@@ -50,12 +50,13 @@ async def chat(req: ChatRequest):
         # 1. 创建线程（幂等）
         await _proxy("POST", "/api/threads", json={"thread_id": thread_id})
 
-        # 2. 启动 run（flash 模式 + 指定模型）
+        # 2. 启动 run（flash 模式 + 指定模型 + 提高递归上限支持多轮工具调用）
         run = await _proxy(
             "POST",
             f"/api/threads/{thread_id}/runs",
             json={
                 "input": {"messages": [{"role": "user", "content": req.message}]},
+                "config": {"recursion_limit": 1000},
                 "context": {
                     "model_name": DEFAULT_MODEL,
                     "mode": "flash",

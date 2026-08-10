@@ -146,9 +146,11 @@ DeerHarness 的 Chat 页面（`:3000/chat`）经 Gateway 代理 DeerFlow 官方�
 - 对话：创建线程 → `POST /threads/{id}/runs`（flash 模式）→ 轮询 → 提取 AI 回复
 - 环境变量：`DEERFLOW_API`（默认 `http://localhost:2026`）、`DEERFLOW_EMAIL`、`DEERFLOW_PASSWORD`
 
-> **联网搜索说明**：当前 DeerFlow 配置已禁用被墙的 DDG 搜索工具（`web_search`/`web_fetch`/`image_search`），
-> 对话走纯模型推理快速路径。如需联网研究，在 `../deer-flow-run/config.yaml` 取消注释并配置
-> SearXNG / Serper / Tavily 等搜索源后重启 gateway 容器即可。
+> **联网搜索**：已启用 **SearXNG**（自托管聚合搜索，`:8088`，无 API key），
+> 配置了国内可用的搜索源（baidu / bing / sogou / mojeek / yandex）。
+> DeerFlow 的 `web_search` 工具指向 `http://host.docker.internal:8088`，
+> 深度研究（多轮搜索 + 引用）真实可用。如需替换为 Serper/Tavily 等商业 API，
+> 修改 `../deer-flow-run/config.yaml` 中 web_search 工具条目即可。
 
 ## 🗺️ 开发进度（Phase）
 
