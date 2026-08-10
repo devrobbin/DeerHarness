@@ -1,0 +1,16 @@
+# License (Pending)
+
+本项目（DeerHarness）是 PenguinHarness 与 ByteDance DeerFlow 的融合项目。
+
+## 上游许可证（已核实）
+
+| 上游项目 | 仓库 | 许可证 |
+|---|---|---|
+| PenguinHarness | https://github.com/Prism-Shadow/penguin-harness | Apache-2.0 |
+| DeerFlow | https://github.com/bytedance/deer-flow | MIT |
+
+两者均为宽松许可证（permissive），可兼容使用（含商业化场景，具体条款以各上游 LICENSE 文件为准）。
+
+## 本项目许可
+
+**待确认**：确认后请在本文件补充正式许可证全文，并在 README.md 中同步更新。
