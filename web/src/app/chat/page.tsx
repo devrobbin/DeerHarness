@@ -1,8 +1,9 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useWebSocket } from '@/lib/useWebSocket';
 import { apiPost } from '@/lib/api';
+import { Markdown } from '@/components/Markdown';
 
 interface ChatMessage {
   role: 'user' | 'assistant';
@@ -16,6 +17,13 @@ export default function ChatPage() {
   const [threadId, setThreadId] = useState<string | undefined>();
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [copied, setCopied] = useState<string | null>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
+
+  // 新消息自动滚到底部
+  useEffect(() => {
+    scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' });
+  }, [messages, loading]);
 
   const handleSend = async () => {
     const text = input.trim();
@@ -38,6 +46,16 @@ export default function ChatPage() {
     }
   };
 
+  const copyText = async (id: string, text: string) => {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(id);
+      setTimeout(() => setCopied(null), 1500);
+    } catch {
+      /* 剪贴板不可用时静默失败 */
+    }
+  };
+
   return (
     <div className="flex h-[calc(100vh-6rem)] flex-col">
       <div className="mb-4 flex items-center justify-between">
@@ -54,22 +72,28 @@ export default function ChatPage() {
         </span>
       </div>
 
-      <div className="flex-1 overflow-y-auto space-y-3 rounded-lg border border-gray-200 bg-white p-4">
+      <div ref={scrollRef} className="flex-1 overflow-y-auto space-y-3 rounded-lg border border-gray-200 bg-white p-4">
         {messages.length === 0 && !loading && (
           <p className="py-10 text-center text-gray-400">
-            向 DeerFlow 提问吧（如：介绍一下 Harness Engineering）…
+            向 DeerFlow 提问吧（支持 Markdown 渲染，如：介绍一下 Harness Engineering）…
           </p>
         )}
         {messages.map((m, i) => (
-          <div key={i} className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+          <div key={i} className={`group flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
             <div
-              className={`max-w-[80%] rounded-lg px-4 py-2.5 text-sm whitespace-pre-wrap ${
-                m.role === 'user'
-                  ? 'bg-blue-500 text-white'
-                  : 'bg-gray-100 text-gray-800'
+              className={`relative max-w-[85%] rounded-lg px-4 py-2.5 ${
+                m.role === 'user' ? 'bg-blue-500 text-white' : 'bg-gray-100 text-gray-800'
               }`}
             >
-              {m.content}
+              <Markdown content={m.content} invert={m.role === 'user'} />
+              {m.role === 'assistant' && (
+                <button
+                  onClick={() => copyText(`msg-${i}`, m.content)}
+                  className="absolute -right-2 -top-2 hidden rounded border border-gray-200 bg-white px-1.5 py-0.5 text-[10px] text-gray-500 shadow-sm hover:text-blue-600 group-hover:block"
+                >
+                  {copied === `msg-${i}` ? '✓ 已复制' : '复制'}
+                </button>
+              )}
             </div>
           </div>
         ))}
@@ -93,7 +117,7 @@ export default function ChatPage() {
           value={input}
           onChange={e => setInput(e.target.value)}
           onKeyDown={e => e.key === 'Enter' && !e.shiftKey && handleSend()}
-          placeholder="输入消息，回车发送"
+          placeholder="输入消息，回车发送（支持 Markdown）"
           disabled={loading}
           className="flex-1 rounded border border-gray-300 p-2 text-sm disabled:opacity-50"
         />

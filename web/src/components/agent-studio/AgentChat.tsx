@@ -1,7 +1,8 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { apiGet, apiPost } from '@/lib/api';
+import { Markdown } from '@/components/Markdown';
 
 interface AgentItem {
   agentId: string;
@@ -23,6 +24,12 @@ export function AgentChat() {
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const scrollRef = useRef<HTMLDivElement>(null);
+
+  // 新消息自动滚到底部
+  useEffect(() => {
+    scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' });
+  }, [messages, loading]);
 
   useEffect(() => {
     apiGet<{ agents: AgentItem[] }>('/api/agents')
@@ -91,7 +98,7 @@ export function AgentChat() {
         {sessionId && <span className="ml-1 font-mono">· {sessionId.slice(-10)}</span>}
       </p>
 
-      <div className="flex-1 space-y-2 overflow-y-auto">
+      <div ref={scrollRef} className="flex-1 space-y-2 overflow-y-auto">
         {messages.length === 0 && !loading && (
           <p className="py-6 text-center text-sm text-gray-400">
             选择上方 Agent 开始对话…
@@ -100,11 +107,11 @@ export function AgentChat() {
         {messages.map((m, i) => (
           <div key={i} className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
             <div
-              className={`max-w-[85%] rounded-lg px-3 py-2 text-sm whitespace-pre-wrap ${
+              className={`max-w-[85%] rounded-lg px-3 py-2 text-sm ${
                 m.role === 'user' ? 'bg-blue-500 text-white' : 'bg-gray-100 text-gray-800'
               }`}
             >
-              {m.content}
+              <Markdown content={m.content} invert={m.role === 'user'} />
             </div>
           </div>
         ))}
