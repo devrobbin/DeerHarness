@@ -102,18 +102,38 @@ bash start.sh
 
 | 分组 | 端点 | 说明 |
 |---|---|---|
-| Agents | `GET/POST /api/agents` | 列出 / 创建 Agent |
-| Evolution | `POST /api/evolution/start` | 启动进化任务（GDPevo） |
-| Evolution | `GET /api/evolution/tasks/{id}/status` | 任务状态（WebSocket 实时推送） |
+| Agents | `GET/POST /api/agents` | 列出 / 创建 Agent（真实代理 penguin，跨项目展开） |
+| Agents | `DELETE /api/agents/{id}?project_id=` | 删除 Agent |
+| Evolution | `GET /api/evolution/tasks` | 跨 Agent 展开 Benchmark 清单（真实端点） |
+| Evolution | `POST /api/evolution/start` | 501：真实 penguin 仅支持 CLI 启动评测 |
 | Traces | `POST /api/traces` | DeerFlow 执行轨迹上报 |
 | Traces | `GET /api/traces?agent_id=` | 轨迹查询 |
-| Dashboard | `GET /api/dashboard/summary` | 聚合统计 |
-| Dashboard | `GET /api/dashboard/health` | 三服务健康检查 |
+| Dashboard | `GET /api/dashboard/summary` | 聚合统计（Agent 数为真实数据） |
+| Dashboard | `GET /api/dashboard/health` | 三服务健康检查（penguin 真实探测） |
 | Cost | `GET /api/cost/summary` | 成本统计 |
 | Settings | `GET/POST /api/settings/{models,skills,mcp,channels}` | 平台配置 CRUD |
 | Safety | `GET/PUT /api/settings/safety` | 进化安全策略 |
 | Users | `POST /api/users` | 创建用户（需 admin，Bearer API Key） |
 | WS | `WS /ws/evolution/{task_id}` | 进化进度实时推送 |
+
+## 🐧 真实上游联调（PenguinHarness）
+
+Gateway 已适配 **真实 penguin-harness API**（与初始框架假设不同，实际端点已核实）：
+
+- Agent 位于 `/api/projects/:projectId/agents`（非顶层 `/api/agents`）
+- 认证：session cookie（`POST /api/auth/login`，body 为 `userId/password`）
+- 评测：`/api/projects/:pid/agents/:aid/benchmarks`（仅查询；启动走 CLI）
+
+```bash
+# 开发模式启动 penguin-harness（同级目录 ../penguin-harness）
+cd ../penguin-harness && pnpm install && pnpm dev:server
+# 首次启动会打印种子管理员密码，如：Seeded built-in admin "admin" — password: penguin-xxxx
+
+# Gateway 侧环境变量（默认值已适配开发模式）
+export PENGUIN_API=http://localhost:7368
+export PENGUIN_USER_ID=admin
+export PENGUIN_PASSWORD=<首次启动打印的密码>
+```
 
 ## 🗺️ 开发进度（Phase）
 
