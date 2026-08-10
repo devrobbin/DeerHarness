@@ -12,10 +12,14 @@ import os
 import time
 import uuid
 
+from penguin_client import PenguinClient
+
 
 router = APIRouter()
 
 TRACES_FILE = os.path.join(os.path.dirname(__file__), "..", "config", "traces.json")
+
+penguin = PenguinClient()
 
 
 class TraceEvent(BaseModel):
@@ -60,6 +64,25 @@ async def ingest_trace(event: TraceEvent):
     traces.append(record)
     _save_traces(traces)
     return {"success": True, "trace_id": record["trace_id"]}
+
+
+@router.get("/penguin/{agent_id}")
+async def penguin_traces(agent_id: str, project_id: str = "default_project"):
+    """真实 PenguinHarness Agent 轨迹（按日期/会话聚合）。
+
+    注意：本路由必须声明在 /{trace_id} 之前，避免路径冲突。
+    """
+    import httpx
+
+    try:
+        resp = await penguin.request(
+            "GET", f"/api/projects/{project_id}/agents/{agent_id}/traces"
+        )
+    except httpx.ConnectError:
+        raise HTTPException(status_code=502, detail="PenguinHarness 服务不可达")
+    if resp.status_code >= 400:
+        raise HTTPException(status_code=resp.status_code, detail=resp.text)
+    return resp.json()
 
 
 @router.get("")

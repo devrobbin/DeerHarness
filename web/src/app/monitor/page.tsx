@@ -20,16 +20,51 @@ interface CostSummary {
   by_agent: Record<string, { count: number; cost: number }>;
 }
 
+interface AgentItem {
+  agentId: string;
+  name: string;
+  project_id: string;
+}
+
+interface PenguinTrace {
+  date: string;
+  sessions: { sessionId: string; files: unknown[] }[];
+}
+
 export default function MonitorPage() {
   const [traces, setTraces] = useState<Trace[]>([]);
   const [cost, setCost] = useState<CostSummary | null>(null);
+  const [agents, setAgents] = useState<AgentItem[]>([]);
+  const [penguinAgent, setPenguinAgent] = useState('');
+  const [penguinTraces, setPenguinTraces] = useState<PenguinTrace[]>([]);
 
   const load = () => {
     apiGet<{ traces: Trace[] }>('/api/traces?limit=100').then(d => setTraces(d.traces)).catch(console.error);
     apiGet<CostSummary>('/api/cost/summary').then(setCost).catch(console.error);
+    apiGet<{ agents: AgentItem[] }>('/api/agents')
+      .then(d => {
+        const seen = new Set<string>();
+        const unique = d.agents.filter(a => {
+          if (seen.has(a.agentId)) return false;
+          seen.add(a.agentId);
+          return true;
+        });
+        setAgents(unique);
+        if (!penguinAgent && unique.length > 0) setPenguinAgent(unique[0].agentId);
+      })
+      .catch(console.error);
   };
 
   useEffect(load, []);
+
+  // 加载真实 penguin 轨迹
+  useEffect(() => {
+    if (!penguinAgent) return;
+    const agent = agents.find(a => a.agentId === penguinAgent);
+    apiGet<{ dates: PenguinTrace[] }>(`/api/traces/penguin/${penguinAgent}?project_id=${agent?.project_id ?? 'default_project'}`)
+      .then(d => setPenguinTraces(d.dates ?? []))
+      .catch(() => setPenguinTraces([]));
+  }, [penguinAgent, agents]);
 
   return (
     <div>
@@ -112,6 +147,43 @@ export default function MonitorPage() {
               </tbody>
             </table>
           </div>
+        </div>
+      </div>
+
+      {/* 真实 PenguinHarness 轨迹 */}
+      <div className="mt-6 rounded-lg border border-gray-200 bg-white p-4">
+        <div className="mb-3 flex items-center justify-between">
+          <h2 className="font-semibold">🐧 PenguinHarness 真实轨迹</h2>
+          <select
+            value={penguinAgent}
+            onChange={e => setPenguinAgent(e.target.value)}
+            className="rounded border border-gray-300 p-1.5 text-xs"
+          >
+            {agents.map(a => (
+              <option key={`${a.project_id}/${a.agentId}`} value={a.agentId}>
+                {a.name}（{a.agentId}）
+              </option>
+            ))}
+          </select>
+        </div>
+        <div className="grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-3">
+          {penguinTraces.map(day => (
+            <div key={day.date} className="rounded border border-gray-100 p-3">
+              <p className="mb-2 text-sm font-medium text-gray-700">📅 {day.date}</p>
+              <div className="space-y-1.5">
+                {day.sessions.map(s => (
+                  <div key={s.sessionId} className="flex items-center justify-between text-xs text-gray-500">
+                    <span className="font-mono">{s.sessionId.slice(-10)}</span>
+                    <span>{s.files.length} 个轨迹文件</span>
+                  </div>
+                ))}
+                {day.sessions.length === 0 && <p className="text-xs text-gray-400">无会话</p>}
+              </div>
+            </div>
+          ))}
+          {penguinTraces.length === 0 && (
+            <p className="text-sm text-gray-400 md:col-span-3">该 Agent 暂无真实轨迹（对话后生成）</p>
+          )}
         </div>
       </div>
     </div>

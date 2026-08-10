@@ -76,5 +76,31 @@ class DeerFlowClient:
             return resp
         raise DeerFlowError("deerflow 请求在重试后仍失败")
 
+    async def open_stream(
+        self, method: str, path: str, *, csrf: bool = True, **kwargs
+    ) -> httpx.Response:
+        """打开一个流式响应（SSE 转发用）；调用方负责 aclose。"""
+        for attempt in range(2):
+            if not self._logged_in:
+                await self._login()
+            headers = dict(kwargs.pop("headers", None) or {})
+            if csrf and method.upper() in _CSRF_METHODS:
+                token = self._client.cookies.get("csrf_token")
+                if token:
+                    headers["X-CSRF-Token"] = token
+            req = self._client.build_request(method, path, headers=headers, **kwargs)
+            try:
+                resp = await self._client.send(req, stream=True)
+            except httpx.ConnectError:
+                self._logged_in = False
+                if attempt == 0:
+                    continue
+                raise
+            if resp.status_code == 401 and self._logged_in:
+                self._logged_in = False
+                continue
+            return resp
+        raise DeerFlowError("deerflow 流式请求在重试后仍失败")
+
     async def aclose(self) -> None:
         await self._client.aclose()

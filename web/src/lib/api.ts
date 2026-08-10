@@ -1,4 +1,4 @@
-const GATEWAY = process.env.NEXT_PUBLIC_GATEWAY_URL || 'http://localhost:8080';
+export const GATEWAY = process.env.NEXT_PUBLIC_GATEWAY_URL || 'http://localhost:8080';
 
 export async function apiGet<T = any>(path: string): Promise<T> {
   const res = await fetch(`${GATEWAY}${path}`);
