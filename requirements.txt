@@ -1,3 +1,0 @@
-# DeerHarness 运行时依赖
-requests>=2.31
-PyYAML>=6.0

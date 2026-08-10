@@ -11,6 +11,12 @@ venv/
 dist/
 build/
 
+# Node / Next.js
+node_modules/
+.next/
+out/
+npm-debug.log*
+
 # IDE
 .idea/
 .vscode/
@@ -26,3 +32,8 @@ Thumbs.db
 
 # Environment
 .env
+.env.local
+
+# Gateway runtime data
+gateway/config/traces.json
+*.tsbuildinfo
