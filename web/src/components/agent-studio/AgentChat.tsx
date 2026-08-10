@@ -16,9 +16,12 @@ interface ChatMsg {
   content: string;
 }
 
+type RuntimeMode = 'penguin' | 'deerflow';
+
 export function AgentChat() {
   const [agents, setAgents] = useState<AgentItem[]>([]);
-  const [selected, setSelected] = useState<string>('');
+  const [selected, setSelected] = useState('');
+  const [mode, setMode] = useState<RuntimeMode>('penguin');
   const [messages, setMessages] = useState<ChatMsg[]>([]);
   const [sessionId, setSessionId] = useState<string | undefined>();
   const [input, setInput] = useState('');
@@ -57,11 +60,16 @@ export function AgentChat() {
     setMessages(prev => [...prev, { role: 'user', content: text }]);
     setLoading(true);
     try {
-      const data = await apiPost<{ reply: string; session_id: string }>(
-        `/api/agents/${selectedAgent.agentId}/chat`,
-        { message: text, project_id: selectedAgent.project_id, session_id: sessionId },
-      );
-      setSessionId(data.session_id);
+      const data = mode === 'penguin'
+        ? await apiPost<{ reply: string; session_id: string }>(
+            `/api/agents/${selectedAgent.agentId}/chat`,
+            { message: text, project_id: selectedAgent.project_id, session_id: sessionId },
+          )
+        : await apiPost<{ reply: string; deerflow_agent: string }>(
+            '/api/fusion/chat',
+            { agent_id: selectedAgent.agentId, project_id: selectedAgent.project_id, message: text },
+          );
+      setSessionId(mode === 'penguin' ? (data as { session_id: string }).session_id : undefined);
       setMessages(prev => [...prev, { role: 'assistant', content: data.reply }]);
     } catch (err) {
       setError(`对话失败：${err instanceof Error ? err.message : err}`);
@@ -72,6 +80,13 @@ export function AgentChat() {
 
   const switchAgent = (agentId: string) => {
     setSelected(agentId);
+    setMessages([]);
+    setSessionId(undefined);
+    setError('');
+  };
+
+  const switchMode = (m: RuntimeMode) => {
+    setMode(m);
     setMessages([]);
     setSessionId(undefined);
     setError('');
@@ -97,6 +112,27 @@ export function AgentChat() {
         与 PenguinHarness Agent 对话 · DeepSeek-V4-Flash
         {sessionId && <span className="ml-1 font-mono">· {sessionId.slice(-10)}</span>}
       </p>
+
+      {/* 运行环境选择：原生 / DeerFlow 运行时（融合） */}
+      <div className="mb-2 flex items-center gap-1 text-xs">
+        <span className="mr-1 text-gray-500">运行环境：</span>
+        <button
+          onClick={() => switchMode('penguin')}
+          className={`rounded-full px-2.5 py-1 ${
+            mode === 'penguin' ? 'bg-blue-100 text-blue-700 font-medium' : 'text-gray-500 hover:bg-gray-100'
+          }`}
+        >
+          🐧 PenguinHarness 原生
+        </button>
+        <button
+          onClick={() => switchMode('deerflow')}
+          className={`rounded-full px-2.5 py-1 ${
+            mode === 'deerflow' ? 'bg-purple-100 text-purple-700 font-medium' : 'text-gray-500 hover:bg-gray-100'
+          }`}
+        >
+          🦌 DeerFlow 运行时（融合）
+        </button>
+      </div>
 
       <div ref={scrollRef} className="flex-1 space-y-2 overflow-y-auto">
         {messages.length === 0 && !loading && (

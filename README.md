@@ -33,6 +33,7 @@ DeerHarness 是 **PenguinHarness**（自进化 Agent 构建工具）与 **ByteDa
 
 - **Gateway**（FastAPI）：统一 API 网关，代理上游服务；API Key + RBAC 认证；WebSocket 实时推送；Trace 采集与成本统计存储。
 - **WebUI**（Next.js 14 + Tailwind）：Dashboard / Chat / Agent Studio / Evolution Lab / Monitor / Settings 六个页面。
+- **Fusion Bridge（真融合）**：PenguinHarness 负责 **Agent 定义**（system prompt 等），DeerFlow 提供 **执行运行时**（沙箱/记忆/子代理/搜索）。`/api/fusion/sync` 把 penguin Agent 同步为 DeerFlow Custom Agent（soul），`/api/fusion/chat` 以该身份在 DeerFlow 中运行 — Agent Studio 可一键切换运行环境。
 - **Docker Compose**：一键编排 DeerFlow + PenguinHarness + Gateway + Web 四服务。
 
 ## 📁 目录结构
