@@ -104,6 +104,7 @@ bash start.sh
 
 | 分组 | 端点 | 说明 |
 |---|---|---|
+| **Chat** | `POST /api/chat` | **DeerHarness WebUI → DeerFlow 真实对话**（DeepSeek V4 Flash，flash 模式） |
 | Agents | `GET/POST /api/agents` | 列出 / 创建 Agent（真实代理 penguin，跨项目展开） |
 | Agents | `DELETE /api/agents/{id}?project_id=` | 删除 Agent |
 | Evolution | `GET /api/evolution/tasks` | 跨 Agent 展开 Benchmark 清单（真实端点） |
@@ -136,6 +137,18 @@ export PENGUIN_API=http://localhost:7368
 export PENGUIN_USER_ID=admin
 export PENGUIN_PASSWORD=<首次启动打印的密码>
 ```
+
+## 💬 DeerFlow 对话集成
+
+DeerHarness 的 Chat 页面（`:3000/chat`）经 Gateway 代理 DeerFlow 官方栈：
+
+- 认证：`POST /api/v1/auth/login/local`（OAuth2 表单）→ 会话 + CSRF 双提交 cookie
+- 对话：创建线程 → `POST /threads/{id}/runs`（flash 模式）→ 轮询 → 提取 AI 回复
+- 环境变量：`DEERFLOW_API`（默认 `http://localhost:2026`）、`DEERFLOW_EMAIL`、`DEERFLOW_PASSWORD`
+
+> **联网搜索说明**：当前 DeerFlow 配置已禁用被墙的 DDG 搜索工具（`web_search`/`web_fetch`/`image_search`），
+> 对话走纯模型推理快速路径。如需联网研究，在 `../deer-flow-run/config.yaml` 取消注释并配置
+> SearXNG / Serper / Tavily 等搜索源后重启 gateway 容器即可。
 
 ## 🗺️ 开发进度（Phase）
 

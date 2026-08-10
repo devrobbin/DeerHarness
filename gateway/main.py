@@ -1,6 +1,6 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from routes import agents, evolution, traces, dashboard, cost, settings, users
+from routes import agents, chat, evolution, traces, dashboard, cost, settings, users
 from ws import router as ws_router
 
 
@@ -15,6 +15,7 @@ app.add_middleware(
 )
 
 app.include_router(agents.router, prefix="/api/agents", tags=["agents"])
+app.include_router(chat.router, prefix="/api/chat", tags=["chat"])
 app.include_router(evolution.router, prefix="/api/evolution", tags=["evolution"])
 app.include_router(traces.router, prefix="/api/traces", tags=["traces"])
 app.include_router(dashboard.router, prefix="/api/dashboard", tags=["dashboard"])
