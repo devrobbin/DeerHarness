@@ -24,7 +24,9 @@ import httpx
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
+import config
 from penguin_client import PenguinClient
+from validate import valid_id
 
 
 router = APIRouter()
@@ -103,6 +105,7 @@ async def create_agent(req: AgentCreateRequest):
 @router.get("/{agent_id}")
 async def get_agent(agent_id: str):
     """获取 Agent 详情（跨项目查找）。"""
+    agent_id = valid_id(agent_id, "agent_id")
     for agent in await _all_agents():
         if agent.get("agentId") == agent_id:
             return {"agent": agent, "project_id": agent["project_id"]}
@@ -112,6 +115,8 @@ async def get_agent(agent_id: str):
 @router.delete("/{agent_id}")
 async def delete_agent(agent_id: str, project_id: str):
     """删除 Agent（需指定所属项目）。"""
+    agent_id = valid_id(agent_id, "agent_id")
+    project_id = valid_id(project_id, "project_id")
     await _proxy("DELETE", f"/api/projects/{project_id}/agents/{agent_id}")
     return {"success": True}
 
@@ -128,7 +133,9 @@ async def chat_with_agent(agent_id: str, req: AgentChatRequest):
 
     回复判定：轮询消息流直到出现比发送前更新的 ``model_msg`` 且文本非空。
     """
-    project_id = req.project_id or DEFAULT_PROJECT
+    agent_id = valid_id(agent_id, "agent_id")
+    project_id = valid_id(req.project_id or DEFAULT_PROJECT, "project_id")
+    session_id = valid_id(req.session_id, "session_id") if req.session_id else None
     try:
         # 1. 会话：复用或新建
         session_id = req.session_id
@@ -188,6 +195,7 @@ def _latest_model_msg(messages: dict) -> tuple[Optional[str], str]:
 @router.get("/{agent_id}/versions")
 async def list_agent_versions(agent_id: str):
     """Agent 版本（真实 penguin 为整数版本号）。"""
+    agent_id = valid_id(agent_id, "agent_id")
     for agent in await _all_agents():
         if agent.get("agentId") == agent_id:
             return {"versions": [agent.get("version", 1)], "current": agent.get("version", 1)}

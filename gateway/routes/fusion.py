@@ -14,10 +14,12 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
 import os
 import re
 import subprocess
+import threading
 import time
 import uuid
 from typing import Optional
@@ -27,8 +29,11 @@ import yaml as _yaml
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
+import config
 from deerflow_client import DeerFlowClient, DeerFlowError
 from penguin_client import PenguinClient
+from validate import valid_id
+from .traces import record_trace
 
 
 router = APIRouter()
@@ -40,22 +45,31 @@ POLL_INTERVAL = 2.0
 POLL_TIMEOUT = 300.0
 
 # deer-flow 运行配置（宿主机路径，与 docker-compose 挂载一致）
-DEERFLOW_CONFIG = os.environ.get(
-    "DEERFLOW_CONFIG", r"D:\ZhiCloud-WorkSpace\deer-flow-run\config.yaml"
-)
-DEERFLOW_COMPOSE_DIR = os.environ.get(
-    "DEERFLOW_COMPOSE_DIR", r"D:\ZhiCloud-WorkSpace\deer-flow"
-)
+DEERFLOW_CONFIG = config.DEERFLOW_CONFIG
+DEERFLOW_COMPOSE_DIR = config.DEERFLOW_COMPOSE_DIR
 
+# 子代理配置写锁 + 上次写入指纹（hash 比对，避免每次请求重写/重启）
+_config_lock = threading.Lock()
+_last_config_hash: Optional[str] = None
 
-class FusionSyncRequest(BaseModel):
-    agent_id: str
-    project_id: Optional[str] = None
+# penguin prompt 同步时的净化包装（来源声明 + 环境失配提示 + 截断上限）
+_PROMPT_WRAPPER = (
+    "以下职责说明由 PenguinHarness Agent 同步而来（DeerHarness Fusion Bridge）。\n"
+    "其中提及的 penguin 专属环境指令（如 CLI、特定目录、scratchpad 等）在本运行时"
+    "可能不适用，请忽略与当前环境不符的指令，专注于职责本身。\n\n"
+)
+_MAX_PROMPT_CHARS = 8000
 
 
 class FusionChatRequest(BaseModel):
     agent_id: str
     message: str
+    project_id: Optional[str] = None
+    thread_id: Optional[str] = None  # 多轮会话复用（评审 B）
+
+
+class FusionSyncRequest(BaseModel):
+    agent_id: str
     project_id: Optional[str] = None
 
 
@@ -88,13 +102,15 @@ async def _get_penguin_agent_def(agent_id: str, project_id: str) -> dict:
     prompt = ""
     yaml_text = data.get("systemConfigYaml") or ""
     if yaml_text:
-        import yaml as _yaml
-
         try:
             cfg = _yaml.safe_load(yaml_text) or {}
             prompt = str(cfg.get("system_prompt") or "")
         except Exception:
             pass
+    # 净化：包装来源声明 + 环境失配提示 + 截断上限（评审 P1-3）
+    prompt = prompt[:_MAX_PROMPT_CHARS]
+    if prompt:
+        prompt = _PROMPT_WRAPPER + prompt
     return {"system_prompt": prompt}
 
 
@@ -150,10 +166,14 @@ async def fusion_sync_all():
 
 @router.post("/chat")
 async def fusion_chat(req: FusionChatRequest):
-    """DeerFlow 运行时执行 penguin Agent：自动同步 → run（assistant_id）→ 轮询回复。"""
-    project_id = req.project_id or "default_project"
+    """DeerFlow 运行时执行 penguin Agent：自动同步 → run（assistant_id）→ 轮询回复。
+
+    多轮会话（评审 B）：复用 thread_id 保留上下文，DeerFlow 压缩机制生效。
+    """
+    req.agent_id = valid_id(req.agent_id, "agent_id")
+    project_id = valid_id(req.project_id or "default_project", "project_id")
+    thread_id = req.thread_id or f"dh-fusion-{uuid.uuid4().hex[:12]}"
     deerflow_agent = await _sync_agent(req.agent_id, project_id)
-    thread_id = f"dh-fusion-{uuid.uuid4().hex[:12]}"
     try:
         await _proxy_df("POST", "/api/threads", json={"thread_id": thread_id})
         run = await _proxy_df(
@@ -181,8 +201,22 @@ async def fusion_chat(req: FusionChatRequest):
             detail = await _proxy_df("GET", f"/api/threads/{thread_id}/runs/{run_id}")
             status = detail.get("status", status)
 
+        if status in ("failed", "error", "cancelled"):
+            record_trace("dh-fusion", status, task_goal=req.message[:200], thread_id=thread_id)
+            raise HTTPException(
+                status_code=502,
+                detail=f"融合对话以 {status} 结束，请稍后重试",
+            )
+
         state = await _proxy_df("GET", f"/api/threads/{thread_id}/state")
         reply = _extract_ai_reply(state)
+        record_trace(
+            "dh-fusion",
+            "success",
+            task_goal=req.message[:200],
+            thread_id=thread_id,
+            agent_version=deerflow_agent,
+        )
         return {
             "reply": reply,
             "thread_id": thread_id,
@@ -252,17 +286,21 @@ async def _read_penguin_agent_defs() -> list[dict]:
     return out
 
 
-def _write_subagents_config(team: list[dict]) -> list[str]:
-    """把团队写入 deer-flow config.yaml 的 subagents.custom_agents（保留注释）。"""
-    with open(DEERFLOW_CONFIG, "r", encoding="utf-8") as f:
-        content = f.read()
+def _write_subagents_config(team: list[dict]) -> tuple[list[str], bool]:
+    """把团队写入 deer-flow config.yaml 的 subagents.custom_agents。
 
+    评审 B：hash 比对（变更才写）+ 原子写（tempfile + os.replace）+ 锁；
+    保留 subagents 段外的全部内容，description 转义防 YAML 注入。
+    返回 (成员列表, 是否发生变更)。
+    """
+    global _last_config_hash
     lines = ["subagents:", "  custom_agents:"]
     for member in team:
         agent_id = re.sub(r"[^A-Za-z0-9_-]", "-", member["agent_id"])
         prompt = member["system_prompt"] or f"你是 {member['name']}。"
+        desc = f"同步自 PenguinHarness Agent：{member['name']}".replace('"', "'")
         lines.append(f"    {agent_id}:")
-        lines.append(f'      description: "同步自 PenguinHarness Agent：{member["name"]}"')
+        lines.append(f"      description: \"{desc}\"")
         lines.append("      system_prompt: |")
         lines.extend("        " + line for line in prompt.splitlines())
         lines.append("      tools: null")
@@ -270,21 +308,43 @@ def _write_subagents_config(team: list[dict]) -> list[str]:
         lines.append("      model: inherit")
     block = "\n".join(lines) + "\n"
 
-    if re.search(r"(?m)^subagents:", content):
-        content = re.sub(r"(?ms)^subagents:.*?(?=^[a-z_]+:|\Z)", block, content, count=1)
-    else:
-        content += "\n\n# ===== DeerHarness 融合：PenguinHarness Agent 团队 =====\n" + block
+    with open(DEERFLOW_CONFIG, "r", encoding="utf-8") as f:
+        content = f.read()
 
-    with open(DEERFLOW_CONFIG, "w", encoding="utf-8") as f:
-        f.write(content)
-    return [m["agent_id"] for m in team]
+    if re.search(r"(?m)^subagents:", content):
+        new_content = re.sub(
+            r"(?ms)^subagents:.*?(?=^[a-z_]+:|\Z)", block, content, count=1
+        )
+    else:
+        new_content = (
+            content
+            + "\n\n# ===== DeerHarness 融合：PenguinHarness Agent 团队 =====\n"
+            + block
+        )
+
+    new_hash = hashlib.sha256(new_content.encode()).hexdigest()
+    changed = new_hash != _last_config_hash
+    if changed:
+        with _config_lock:
+            # 锁内二次比对，避免并发下重复写
+            if new_hash != _last_config_hash:
+                # 原子写：临时文件 + os.replace
+                tmp = DEERFLOW_CONFIG + ".tmp"
+                with open(tmp, "w", encoding="utf-8") as f:
+                    f.write(new_content)
+                os.replace(tmp, DEERFLOW_CONFIG)
+                _last_config_hash = new_hash
+    return [m["agent_id"] for m in team], changed
 
 
 def _restart_deerflow_gateway() -> None:
-    """重启 deer-flow gateway 容器使 subagents 配置生效（宿主机执行 docker）。"""
+    """重启 deer-flow gateway 容器（仅配置变更时由调用方触发）。
+
+    使用 `compose restart`（不重建镜像，快且不丢运行态）。
+    """
     try:
         subprocess.run(
-            ["docker", "compose", "-f", "docker/docker-compose.yaml", "up", "-d", "gateway"],
+            ["docker", "compose", "-f", "docker/docker-compose.yaml", "restart", "gateway"],
             cwd=DEERFLOW_COMPOSE_DIR,
             capture_output=True,
             timeout=120,
@@ -302,12 +362,14 @@ async def fusion_team_sync(req: Optional[FusionTeamSyncRequest] = None):
     """把全部（或指定）penguin Agent 注册为 DeerFlow 子代理团队并生效。"""
     team = await _read_penguin_agent_defs()
     if req and req.agent_id:
+        req.agent_id = valid_id(req.agent_id, "agent_id")
         team = [m for m in team if m["agent_id"] == req.agent_id]
         if not team:
             raise HTTPException(status_code=404, detail="Agent 不存在")
-    synced = _write_subagents_config(team)
-    _restart_deerflow_gateway()
-    return {"success": True, "team": synced, "config": DEERFLOW_CONFIG}
+    synced, changed = _write_subagents_config(team)
+    if changed:
+        _restart_deerflow_gateway()
+    return {"success": True, "team": synced, "config": DEERFLOW_CONFIG, "restarted": changed}
 
 
 async def _sync_orchestrator(template: str) -> str:
@@ -359,8 +421,10 @@ async def fusion_team_run(req: FusionTeamRunRequest):
     if not team:
         raise HTTPException(status_code=404, detail="团队为空：请先在 penguin 创建 Agent")
 
-    synced = _write_subagents_config(team)
-    _restart_deerflow_gateway()
+    synced, changed = _write_subagents_config(team)
+    if changed:
+        # 仅配置变化才重启（评审 B：避免每次请求杀并发 run）
+        _restart_deerflow_gateway()
 
     # 模板主代理（可选）
     orchestrator = None
@@ -393,9 +457,28 @@ async def fusion_team_run(req: FusionTeamRunRequest):
             detail = await _proxy_df("GET", f"/api/threads/{thread_id}/runs/{run_id}")
             status = detail.get("status", status)
 
+        if status in ("failed", "error", "cancelled"):
+            # 失败不再伪装成功（评审 B）
+            record_trace("dh-team", status, task_goal=req.task[:200], thread_id=thread_id)
+            raise HTTPException(
+                status_code=502,
+                detail=f"团队任务以 {status} 结束，请稍后重试或查看 DeerFlow 线程 {thread_id}",
+            )
+
         state = await _proxy_df("GET", f"/api/threads/{thread_id}/state")
         reply = _extract_ai_reply(state)
         delegation = _extract_delegations(state)
+        # 观测闭环（评审 C）：记录轨迹 + 分派统计
+        record_trace(
+            "dh-team",
+            "success",
+            task_goal=req.task[:200],
+            thread_id=thread_id,
+            delegations=len(delegation),
+            delegations_failed=sum(
+                1 for d in delegation if "failed" in d.get("result", "").lower()
+            ),
+        )
         return {
             "reply": reply,
             "thread_id": thread_id,

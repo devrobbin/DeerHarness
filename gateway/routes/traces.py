@@ -9,10 +9,13 @@ from pydantic import BaseModel
 from typing import Optional
 import json
 import os
+import threading
 import time
 import uuid
 
+import config
 from penguin_client import PenguinClient
+from validate import valid_id
 
 
 router = APIRouter()
@@ -20,6 +23,9 @@ router = APIRouter()
 TRACES_FILE = os.path.join(os.path.dirname(__file__), "..", "config", "traces.json")
 
 penguin = PenguinClient()
+
+# 本地 Trace 存储：锁 + 原子写（评审 C / P1-1）
+_traces_lock = threading.Lock()
 
 
 class TraceEvent(BaseModel):
@@ -48,21 +54,49 @@ def _load_traces() -> list[dict]:
 
 def _save_traces(traces: list[dict]):
     os.makedirs(os.path.dirname(TRACES_FILE), exist_ok=True)
-    with open(TRACES_FILE, "w") as f:
+    tmp = TRACES_FILE + ".tmp"
+    with open(tmp, "w") as f:
         json.dump(traces, f, indent=2, ensure_ascii=False)
+    os.replace(tmp, TRACES_FILE)
+
+
+def record_trace(agent_id: str, status: str, **extra) -> dict:
+    """记录一条执行轨迹（chat/fusion 等路由在 run 终态调用，评审 C）。
+
+    线程安全 + 原子写；返回生成的 trace 记录。
+    """
+    trace = {
+        "trace_id": str(uuid.uuid4()),
+        "received_at": time.time(),
+        "agent_id": agent_id,
+        "agent_version": "latest",
+        "task_goal": extra.pop("task_goal", ""),
+        "status": status,
+        "cost": extra.pop("cost", None),
+        **extra,
+    }
+    with _traces_lock:
+        traces = _load_traces()
+        traces.append(trace)
+        _save_traces(traces)
+    return trace
 
 
 @router.post("")
 async def ingest_trace(event: TraceEvent):
     """DeerFlow 执行完成后回调上报轨迹。"""
-    traces = _load_traces()
-    record = {
-        "trace_id": str(uuid.uuid4()),
-        "received_at": time.time(),
-        **event.model_dump(),
-    }
-    traces.append(record)
-    _save_traces(traces)
+    record = record_trace(
+        event.agent_id,
+        event.status,
+        task_goal=event.task_goal,
+        tool_calls=event.tool_calls,
+        output=event.output,
+        score=event.score,
+        user_liked=event.user_liked,
+        root_cause=event.root_cause,
+        cost=event.cost,
+        metadata=event.metadata,
+    )
     return {"success": True, "trace_id": record["trace_id"]}
 
 
@@ -74,6 +108,8 @@ async def penguin_traces(agent_id: str, project_id: str = "default_project"):
     """
     import httpx
 
+    agent_id = valid_id(agent_id, "agent_id")
+    project_id = valid_id(project_id, "project_id")
     try:
         resp = await penguin.request(
             "GET", f"/api/projects/{project_id}/agents/{agent_id}/traces"

@@ -1,1 +1,9 @@
-[]
+[
+  {
+    "id": "f44fc840ac66",
+    "username": "admin",
+    "role": "admin",
+    "api_key_hash": "3251d43fb9ea9c0ba1928cea684db9289ff9c743820205a2eff5052a7ffa3e96",
+    "created_at": 1786355289.9836068
+  }
+]

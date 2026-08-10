@@ -21,7 +21,10 @@ from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
+import config
 from deerflow_client import DeerFlowClient, DeerFlowError
+from .traces import record_trace
+from validate import valid_id
 
 
 router = APIRouter()
@@ -96,10 +99,22 @@ async def chat_stream(req: ChatRequest):
                 if delta:
                     yield f"event: text\ndata: {json.dumps(delta)}\n\n"
                 prev = text
+            # 观测闭环（评审 C）：流正常结束 → 记录轨迹
+            record_trace(
+                "dh-chat",
+                "success",
+                task_goal=req.message[:200],
+                thread_id=thread_id,
+                duration_s=round(time.monotonic() - _started, 1),
+            )
             yield "event: done\ndata: {}\n\n"
+        except Exception:
+            record_trace("dh-chat", "error", task_goal=req.message[:200], thread_id=thread_id)
+            raise
         finally:
             await resp.aclose()
 
+    _started = time.monotonic()
     return StreamingResponse(event_source(), media_type="text/event-stream")
 
 
@@ -187,6 +202,10 @@ async def chat(req: ChatRequest):
             await asyncio_sleep(RUN_POLL_INTERVAL)
             detail = await _proxy("GET", f"/api/threads/{thread_id}/runs/{run_id}")
             status = detail.get("status", status)
+
+        if status in ("failed", "error", "cancelled"):
+            # 失败不再伪装成"未返回内容"（评审 B）
+            raise HTTPException(status_code=502, detail=f"DeerFlow 任务以 {status} 结束，请稍后重试")
 
         # 4. 提取最后一条 AI 回复
         state = await _proxy("GET", f"/api/threads/{thread_id}/state")

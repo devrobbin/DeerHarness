@@ -6,21 +6,17 @@
 - Agent 位于 /api/projects/:projectId/agents 下，Benchmark 位于
   /api/projects/:projectId/agents/:agentId/benchmarks 下。
 
-本模块负责：登录换取 cookie → 复用会话 → 401（会话过期）时自动重新登录重试一次。
+本模块负责：登录换取 cookie → 复用会话 → 401（会话过期）或连接错误时
+自动重新登录重试一次。凭据来自统一配置（config.py，必填环境变量）。
 """
 
 from __future__ import annotations
 
 import asyncio
-import os
 
 import httpx
 
-PENGUIN_API = os.environ.get("PENGUIN_API", "http://localhost:7368")
-PENGUIN_USER_ID = os.environ.get("PENGUIN_USER_ID", "admin")
-# 开发模式（~/.penguin/dev-data）首次启动会种子内置管理员并打印初始密码；
-# 生产环境请务必通过 PENGUIN_PASSWORD 注入真实密码。
-PENGUIN_PASSWORD = os.environ.get("PENGUIN_PASSWORD", "penguin-3983")
+import config
 
 
 class PenguinError(RuntimeError):
@@ -33,7 +29,9 @@ class PenguinClient:
     def __init__(self) -> None:
         # trust_env=False：本机 Windows 系统代理（如 Clash :7890）会拦截回环
         # 地址请求并返回 502，本地服务必须直连
-        self._client = httpx.AsyncClient(base_url=PENGUIN_API, timeout=30.0, trust_env=False)
+        self._client = httpx.AsyncClient(
+            base_url=config.PENGUIN_API, timeout=30.0, trust_env=False
+        )
         self._lock = asyncio.Lock()
         self._logged_in = False
 
@@ -41,7 +39,7 @@ class PenguinClient:
         async with self._lock:
             resp = await self._client.post(
                 "/api/auth/login",
-                json={"userId": PENGUIN_USER_ID, "password": PENGUIN_PASSWORD},
+                json={"userId": config.PENGUIN_USER_ID, "password": config.PENGUIN_PASSWORD},
             )
             if resp.status_code != 200:
                 raise PenguinError(

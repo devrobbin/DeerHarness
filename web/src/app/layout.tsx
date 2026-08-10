@@ -1,6 +1,7 @@
 import type { Metadata } from 'next';
 import Link from 'next/link';
 import { Logo } from '@/components/Logo';
+import { ApiKeyInput } from '@/components/ApiKeyInput';
 import './globals.css';
 
 export const metadata: Metadata = {
@@ -39,6 +40,9 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
                 </Link>
               ))}
             </nav>
+            <div className="mt-6 border-t border-gray-100 pt-4">
+              <ApiKeyInput />
+            </div>
           </aside>
           <main className="flex-1 p-6">{children}</main>
         </div>

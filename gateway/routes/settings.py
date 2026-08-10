@@ -1,15 +1,11 @@
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from typing import Optional
-import httpx
 import json
 import os
 
 
 router = APIRouter()
-
-DEERFLOW_API = "http://localhost:8001"
-PENGUIN_API = "http://localhost:7364"
 
 CONFIG_FILE = os.path.join(os.path.dirname(__file__), "..", "config", "settings.json")
 

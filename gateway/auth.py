@@ -3,12 +3,15 @@ from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel
 from typing import Optional
 import hashlib
+import hmac
 import json
 import os
 import time
 
+import config
 
-security = HTTPBearer()
+
+security = HTTPBearer(auto_error=False)
 
 USERS_FILE = os.path.join(os.path.dirname(__file__), "config", "users.json")
 
@@ -52,20 +55,40 @@ def verify_api_key(api_key: str) -> Optional[User]:
     users = _load_users()
     key_hash = hashlib.sha256(api_key.encode()).hexdigest()
     for u in users:
-        if u["api_key_hash"] == key_hash:
+        # 恒定时间比较，防时序侧信道
+        if hmac.compare_digest(u["api_key_hash"], key_hash):
             return User(**u)
     return None
 
 
+def bootstrap_admin() -> Optional[User]:
+    """启动时播种管理员：用户库为空且配置了 ADMIN_API_KEY 时创建。
+
+    解决"第一个管理员无法创建"的鸡生蛋问题（评审 P0-5）。
+    """
+    if not config.ADMIN_API_KEY:
+        return None
+    if _load_users():
+        return None
+    return create_user("admin", config.ADMIN_API_KEY, role="admin")
+
+
 async def get_current_user(
-    credentials: HTTPAuthorizationCredentials = Depends(security),
+    credentials: Optional[HTTPAuthorizationCredentials] = Depends(security),
 ) -> User:
-    """从 Bearer Token 中验证用户"""
+    """从 Bearer Token 中验证用户（缺失凭证返回 401）。"""
+    if credentials is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="缺少 API Key（Authorization: Bearer <key>）",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
     user = verify_api_key(credentials.credentials)
     if not user:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="无效的 API Key",
+            headers={"WWW-Authenticate": "Bearer"},
         )
     return user
 

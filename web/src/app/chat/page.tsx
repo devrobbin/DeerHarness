@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { useWebSocket } from '@/lib/useWebSocket';
-import { apiGet, GATEWAY } from '@/lib/api';
+import { apiGet, apiStream } from '@/lib/api';
 import { Markdown } from '@/components/Markdown';
 
 interface ChatMessage {
@@ -48,11 +48,7 @@ export default function ChatPage() {
     setMessages(prev => [...prev, { role: 'assistant', content: '' }]);
     setLoading(true);
     try {
-      const res = await fetch(`${GATEWAY}/api/chat/stream`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: text, thread_id: threadId }),
-      });
+      const res = await apiStream('/api/chat/stream', { message: text, thread_id: threadId });
       if (!res.ok) {
         const detail = await res.text();
         throw new Error(`HTTP ${res.status}: ${detail.slice(0, 120)}`);
@@ -75,10 +71,11 @@ export default function ChatPage() {
           let data = '';
           for (const line of part.split('\n')) {
             if (line.startsWith('event:')) evt = line.slice(6).trim();
-            else if (line.startsWith('data:')) data += line.slice(5).trim();
+            // 多行 data: 用换行连接（评审 D：修复 trim 破坏代码块缩进）
+            else if (line.startsWith('data:')) data += line.slice(5) + '\n';
           }
-          if (!data) continue;
-          const payload = JSON.parse(data);
+          if (!data.trim()) continue;
+          const payload = JSON.parse(data.trimEnd());
           if (evt === 'meta') {
             newThreadId = payload.thread_id;
           } else if (evt === 'text') {

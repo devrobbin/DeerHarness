@@ -4,6 +4,16 @@ set -e
 
 cd "$(dirname "$0")"
 
+# 加载 .env（必填环境变量，缺失即启动失败）
+if [ -f .env ]; then
+  set -a
+  source .env
+  set +a
+else
+  echo "⚠️  未找到 .env，请先 cp .env.example .env 并填写必填项"
+  exit 1
+fi
+
 # 1. 启动 Gateway（端口 8080）
 echo "🚀 启动 DeerHarness Gateway (http://localhost:${GATEWAY_PORT:-8080}) ..."
 (cd gateway && pip install -q -r requirements.txt && uvicorn main:app --host 0.0.0.0 --port "${GATEWAY_PORT:-8080}" --reload) &

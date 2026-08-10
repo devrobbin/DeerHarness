@@ -6,10 +6,12 @@ import { apiDelete, apiGet } from '@/lib/api';
 interface Agent {
   id?: string;
   agent_id?: string;
+  agentId?: string;
   name: string;
   description?: string;
   model?: string | null;
   version?: string;
+  project_id?: string;
 }
 
 export function AgentList() {
@@ -25,9 +27,16 @@ export function AgentList() {
 
   useEffect(() => { fetchAgents(); }, []);
 
-  const handleDelete = async (id: string) => {
-    await apiDelete(`/api/agents/${id}`);
-    fetchAgents();
+  const handleDelete = async (agent: Agent) => {
+    const id = agent.agentId ?? agent.id ?? agent.agent_id ?? '';
+    const projectId = agent.project_id ?? 'default_project';
+    if (!id) return;
+    try {
+      await apiDelete(`/api/agents/${encodeURIComponent(id)}?project_id=${encodeURIComponent(projectId)}`);
+      fetchAgents();
+    } catch (err) {
+      alert(`删除失败：${err instanceof Error ? err.message : err}`);
+    }
   };
 
   return (
@@ -45,7 +54,7 @@ export function AgentList() {
               <p className="text-xs text-gray-500">{a.description}</p>
             </div>
             <button
-              onClick={() => handleDelete(a.id ?? a.agent_id ?? '')}
+              onClick={() => handleDelete(a)}
               className="text-red-500 text-sm hover:text-red-700"
             >
               删除

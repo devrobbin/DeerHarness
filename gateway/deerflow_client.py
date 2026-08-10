@@ -10,15 +10,14 @@
 from __future__ import annotations
 
 import asyncio
-import os
 
 import httpx
 
-DEERFLOW_API = os.environ.get("DEERFLOW_API", "http://localhost:2026")
-DEERFLOW_EMAIL = os.environ.get("DEERFLOW_EMAIL", "admin@deerharness.com")
-# DeerFlow 本地管理员账号（首次运行在 DeerFlow WebUI 创建）；
-# 生产环境请通过 DEERFLOW_EMAIL / DEERFLOW_PASSWORD 环境变量注入
-DEERFLOW_PASSWORD = os.environ.get("DEERFLOW_PASSWORD", "DeerHarness-2026")
+import config
+
+DEERFLOW_API = config.DEERFLOW_API
+DEERFLOW_EMAIL = config.DEERFLOW_EMAIL
+DEERFLOW_PASSWORD = config.DEERFLOW_PASSWORD
 
 _CSRF_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
 

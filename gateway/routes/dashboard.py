@@ -9,14 +9,16 @@ import httpx
 import json
 import os
 
-from penguin_client import PenguinClient, PENGUIN_API
+import config
+from penguin_client import PenguinClient
 
 from .agents import _all_agents
 
 
 router = APIRouter()
 
-DEERFLOW_API = "http://localhost:2026"  # DeerFlow 官方栈 nginx 前门（内部 gateway:8001）
+DEERFLOW_API = config.DEERFLOW_API  # 统一配置（评审：消除硬编码端口）
+PENGUIN_API = config.PENGUIN_API
 
 TRACES_FILE = os.path.join(os.path.dirname(__file__), "..", "config", "traces.json")
 
