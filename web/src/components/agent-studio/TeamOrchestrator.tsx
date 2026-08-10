@@ -24,6 +24,7 @@ interface TeamResult {
 export function TeamOrchestrator() {
   const [agents, setAgents] = useState<AgentItem[]>([]);
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [template, setTemplate] = useState('');
   const [task, setTask] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -68,6 +69,7 @@ export function TeamOrchestrator() {
       const data = await apiPost<TeamResult>('/api/fusion/team/run', {
         task: task.trim(),
         agent_ids: Array.from(selected),
+        template: template || undefined,
       });
       setResult(data);
     } catch (err) {
@@ -102,8 +104,16 @@ export function TeamOrchestrator() {
         {agents.length === 0 && <p className="text-xs text-gray-400">暂无 Agent</p>}
       </div>
 
-      {/* 任务输入 */}
-      <div className="flex gap-2">
+      {/* 任务输入 + 模板 */}
+      <div className="mb-2 flex gap-2">
+        <select
+          value={template}
+          onChange={e => setTemplate(e.target.value)}
+          className="rounded border border-gray-300 p-2 text-xs text-gray-600"
+        >
+          <option value="">🧭 默认主代理</option>
+          <option value="crossborder-ops">🌏 CrossBorder Ops 运营总监</option>
+        </select>
         <input
           value={task}
           onChange={e => setTask(e.target.value)}

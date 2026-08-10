@@ -202,6 +202,30 @@ class FusionTeamSyncRequest(BaseModel):
 class FusionTeamRunRequest(BaseModel):
     task: str
     agent_ids: Optional[list[str]] = None  # 指定团队成员；None = 全部 penguin Agent
+    template: Optional[str] = None  # 团队模板：预设主代理（orchestrator）人设
+
+
+# ==================== 团队模板 ====================
+# 预设主代理人设 + 编排指引，即"组合版本"的团队工作模式。
+TEAM_TEMPLATES: dict[str, dict] = {
+    "crossborder-ops": {
+        "name": "dh-orchestrator",
+        "description": "CrossBorder Ops 跨境运营总监（编排中心）",
+        "soul": """你是 CrossBorder Ops 跨境运营总监（编排中心），统筹跨境电商运营的各类任务。
+
+工作方式：
+1. 接收运营任务后，先拆解为清晰的子任务；
+2. 通过 task 工具把子任务分派给最合适的团队成员（子代理），可并行推进；
+3. 汇总各成员结果，输出完整、可执行、面向跨境电商运营场景的结论（选品/定价/内容/物流/财税）。
+
+团队成员：
+- default_agent：通用执行 Agent（搜索、分析、报告）
+- agent：代码/工单助手（开发、数据、流程自动化）
+- summarizer：摘要专家（长文提炼、要点归纳）
+
+风格：简洁、专业、结果导向。""",
+    },
+}
 
 
 async def _read_penguin_agent_defs() -> list[dict]:
@@ -286,12 +310,47 @@ async def fusion_team_sync(req: Optional[FusionTeamSyncRequest] = None):
     return {"success": True, "team": synced, "config": DEERFLOW_CONFIG}
 
 
+async def _sync_orchestrator(template: str) -> str:
+    """同步模板主代理为 DeerFlow Custom Agent（幂等），返回 agent 名。"""
+    spec = TEAM_TEMPLATES.get(template)
+    if not spec:
+        raise HTTPException(status_code=404, detail=f"未知团队模板: {template}")
+    name = spec["name"]
+    agents = await _proxy_df("GET", "/api/agents")
+    exists = any(a.get("name") == name for a in agents.get("agents", []))
+    if exists:
+        await _proxy_df("PUT", f"/api/agents/{name}", json={"soul": spec["soul"]})
+    else:
+        await _proxy_df(
+            "POST",
+            "/api/agents",
+            json={
+                "name": name,
+                "description": spec["description"],
+                "model": DEFAULT_MODEL,
+                "soul": spec["soul"],
+            },
+        )
+    return name
+
+
+@router.post("/team/templates")
+async def fusion_team_templates():
+    """列出可用团队模板。"""
+    return {
+        "templates": [
+            {"name": key, "description": spec["description"]}
+            for key, spec in TEAM_TEMPLATES.items()
+        ]
+    }
+
+
 @router.post("/team/run")
 async def fusion_team_run(req: FusionTeamRunRequest):
     """团队编排：主代理（DeerFlow）按需把子任务分派给团队成员（penguin Agent）。
 
     - 自动同步团队配置并重启使生效（首次调用）
-    - 以 ultra 模式运行（subagent_enabled=true），主代理用 task 工具分派
+    - 指定 template 时以模板主代理（如跨境运营总监）身份编排
     - 返回最终回复 + 编排过程（task 分派记录）
     """
     team = await _read_penguin_agent_defs()
@@ -303,22 +362,26 @@ async def fusion_team_run(req: FusionTeamRunRequest):
     synced = _write_subagents_config(team)
     _restart_deerflow_gateway()
 
+    # 模板主代理（可选）
+    orchestrator = None
+    if req.template:
+        orchestrator = await _sync_orchestrator(req.template)
+
     thread_id = f"dh-team-{uuid.uuid4().hex[:12]}"
     try:
         await _proxy_df("POST", "/api/threads", json={"thread_id": thread_id})
-        run = await _proxy_df(
-            "POST",
-            f"/api/threads/{thread_id}/runs",
-            json={
-                "input": {"messages": [{"role": "user", "content": req.task}]},
-                "config": {"recursion_limit": 2000},
-                "context": {
-                    "model_name": DEFAULT_MODEL,
-                    "mode": "ultra",
-                    "subagent_enabled": True,
-                },
+        run_body: dict = {
+            "input": {"messages": [{"role": "user", "content": req.task}]},
+            "config": {"recursion_limit": 2000},
+            "context": {
+                "model_name": DEFAULT_MODEL,
+                "mode": "ultra",
+                "subagent_enabled": True,
             },
-        )
+        }
+        if orchestrator:
+            run_body["assistant_id"] = orchestrator
+        run = await _proxy_df("POST", f"/api/threads/{thread_id}/runs", json=run_body)
         run_id = run.get("run_id")
 
         deadline = time.monotonic() + POLL_TIMEOUT
