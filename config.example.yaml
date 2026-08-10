@@ -1,0 +1,36 @@
+# DeerHarness 配置示例：复制为 config.yaml 后按需修改
+# 支持 ${ENV_VAR} 环境变量占位符
+
+# ---- Agent Factory（PenguinHarness 服务）----
+agent_factory:
+  base_url: http://localhost:8001
+  api_key: ${PENGUIN_API_KEY}
+  timeout: 30.0
+
+# ---- Orchestrator（DeerFlow 运行时）----
+orchestrator:
+  base_url: http://localhost:8000
+  dynamic_loader_enabled: true
+  canary_percent: 10.0        # 灰度流量比例（%）
+
+# ---- Data Pipeline（数据闭环）----
+pipeline:
+  filter:
+    # 纳入进化的轨迹类型（可配置为按规则名启停）
+    include:
+      - task_success_liked          # 成功且用户点赞
+      - failure_root_cause_clear    # 失败但根因明确
+      - ab_test_winner              # A/B 胜出组
+    # 排除的轨迹类型（安全护栏，防止进化污染）
+    exclude:
+      - malicious                   # 恶意操作
+      - system_fault                # 系统级故障
+      - privacy_sensitive           # 隐私敏感数据
+  evolution:
+    min_weekly_executions: 1000     # 周执行次数下限（低于不触发，控成本）
+    max_success_rate: 0.80          # 成功率低于该值才触发进化
+    batch_size: 50                  # 单批进化样本数
+  canary:
+    percent: 10.0                   # 新版灰度比例（%）
+    promote_after: 100              # 灰度观察样本数
+    min_success_rate: 0.90          # 灰度成功率达标才全量

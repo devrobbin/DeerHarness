@@ -52,23 +52,36 @@ DeerHarness 是 **PenguinHarness**（自进化 Agent 构建工具）与 **ByteDa
 
 ```
 deerHarness/
-├── README.md          # 项目说明
-├── LICENSE            # 许可证（待确认上游兼容性后补充）
-├── .gitignore         # 忽略规则
-└── (待融合的上游代码 / 服务层代码)
+├── main.py                    # 入口：离线演示数据闭环
+├── config.example.yaml        # 配置示例（Agent Factory / Orchestrator / Pipeline）
+├── requirements.txt           # 运行时依赖
+├── deerharness/
+│   ├── config.py              # 配置加载
+│   ├── models.py              # 数据契约：AgentSpec / TraceRecord / EvolutionJob
+│   ├── pipeline.py            # 数据闭环：Trace 收集 → 反馈过滤 → 进化队列 → 灰度发布
+│   ├── agent_factory.py       # PenguinHarness 客户端（Agent Provider）
+│   └── orchestrator.py        # DeerFlow 集成：DynamicAgentLoader 按需加载
+├── README.md                  # 项目说明
+├── LICENSE                    # 许可证（待确认上游兼容性后补充）
+└── .gitignore                 # 忽略规则
 ```
 
 ## 🚀 快速开始
 
-> 当前为项目初始化骨架，融合代码将随开发进度补充。
-
 ```bash
-# 示例：安装依赖
+# 1. 安装依赖
 pip install -r requirements.txt
 
-# 示例：启动服务
-python main.py
+# 2. 离线演示数据闭环（不访问任何外部服务）
+python main.py demo
+
+# 3. 接入真实服务：复制配置并修改
+cp config.example.yaml config.yaml
+#    编辑 config.yaml：填入你的 PenguinHarness / DeerFlow 服务地址
+python main.py demo --config config.yaml
 ```
+
+`demo` 模式会完整演示融合架构的核心闭环：Trace 反馈过滤 → 动态加载 Agent（灰度/稳定分流）→ 进化任务触发 → 灰度观察与全量发布。
 
 ## 🔄 同步上游更新
 
