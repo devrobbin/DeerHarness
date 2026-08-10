@@ -1,6 +1,8 @@
-# 🦌🐧 DeerHarness
+# DeerHarness
 
 **Fusion of PenguinHarness and DeerFlow — Self-evolving Agent construction meets robust multi-agent orchestration.**
+
+> 🎨 项目图标：`web/public/deerharness-logo.svg`（戴鹿角的企鹅 + Harness 轨道，融合两上游元素的原创设计，未使用任一上游图标）
 
 DeerHarness 是 **PenguinHarness**（自进化 Agent 构建工具）与 **ByteDance DeerFlow**（长链路多智能体执行框架）的融合项目，提供统一管理平台：
 

@@ -48,15 +48,24 @@ class PenguinClient:
             self._logged_in = True
 
     async def request(self, method: str, path: str, **kwargs) -> httpx.Response:
-        """发起请求；未登录先登录，401 会话过期则重新登录重试一次。"""
-        if not self._logged_in:
-            await self._login()
-        resp = await self._client.request(method, path, **kwargs)
-        if resp.status_code == 401 and self._logged_in:
-            self._logged_in = False
-            await self._login()
-            resp = await self._client.request(method, path, **kwargs)
-        return resp
+        """发起请求；未登录先登录；401（会话过期）或连接错误时
+        强制重新登录后重试一次，避免长驻进程会话陈旧。"""
+        for attempt in range(2):
+            if not self._logged_in:
+                await self._login()
+            try:
+                resp = await self._client.request(method, path, **kwargs)
+            except httpx.ConnectError:
+                # 连接失败可能是上游重启/连接池陈旧：重置会话重试一次
+                self._logged_in = False
+                if attempt == 0:
+                    continue
+                raise
+            if resp.status_code == 401 and self._logged_in:
+                self._logged_in = False
+                continue
+            return resp
+        raise PenguinError("penguin 请求在重试后仍失败")
 
     async def aclose(self) -> None:
         await self._client.aclose()

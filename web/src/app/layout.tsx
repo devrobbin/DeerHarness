@@ -1,5 +1,6 @@
 import type { Metadata } from 'next';
 import Link from 'next/link';
+import { Logo } from '@/components/Logo';
 import './globals.css';
 
 export const metadata: Metadata = {
@@ -22,7 +23,10 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       <body className="min-h-screen bg-gray-50 text-gray-900">
         <div className="flex">
           <aside className="w-52 shrink-0 min-h-screen border-r border-gray-200 bg-white p-4">
-            <h1 className="text-xl font-bold">🦌🐧 DeerHarness</h1>
+            <div className="mb-1 flex items-center gap-2.5">
+              <Logo size={34} />
+              <h1 className="text-xl font-bold">DeerHarness</h1>
+            </div>
             <p className="mb-6 text-xs text-gray-400">PenguinHarness × DeerFlow</p>
             <nav className="space-y-1">
               {NAV.map(item => (
