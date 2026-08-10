@@ -16,7 +16,7 @@ from .agents import _all_agents
 
 router = APIRouter()
 
-DEERFLOW_API = "http://localhost:8001"
+DEERFLOW_API = "http://localhost:2026"  # DeerFlow 官方栈 nginx 前门（内部 gateway:8001）
 
 TRACES_FILE = os.path.join(os.path.dirname(__file__), "..", "config", "traces.json")
 
@@ -43,10 +43,15 @@ async def _check_penguin() -> dict:
 
 
 async def _check_deerflow() -> dict:
-    """DeerFlow 健康检查（其真实健康端点待联调确认，暂用 /api/health 探测）。"""
+    """DeerFlow 健康检查（真实官方栈：nginx 前门 :2026）。
+
+    注意：DeerFlow 的 /api/health 需要认证（未带凭证返回 401），
+    因此以 nginx 前门响应作为存活判据。
+    """
     try:
-        async with httpx.AsyncClient() as client:
-            resp = await client.get(f"{DEERFLOW_API}/api/health", timeout=3)
+        # trust_env=False：避免本机系统代理拦截回环地址（见 penguin_client 注释）
+        async with httpx.AsyncClient(trust_env=False) as client:
+            resp = await client.get(f"{DEERFLOW_API}/", timeout=3)
             return {"url": DEERFLOW_API, "status": "up" if resp.status_code < 500 else "degraded"}
     except (httpx.TimeoutException, httpx.ConnectError):
         return {"url": DEERFLOW_API, "status": "down"}

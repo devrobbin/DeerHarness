@@ -1,37 +1,15 @@
-version: "3.9"
+# DeerHarness 自有服务编排（Gateway + WebUI）。
+#
+# ⚠️ 真实上游集成说明（千问初版假设已修正）：
+#   - DeerFlow 官方栈（redis/nginx/frontend/gateway/provisioner）用其自带编排启动：
+#       cd ../deer-flow && cp .env.example .env  # 填入 BETTER_AUTH_SECRET 等
+#       docker compose -f docker/docker-compose.yaml up -d
+#     （nginx 前门 :2026，内部 gateway:8001；provisioner 为可选 K8s 组件）
+#   - PenguinHarness（Node/pnpm 项目，非 Python）用开发模式启动：
+#       cd ../penguin-harness && pnpm install && pnpm dev:server   # :7368
+#   - 上游没有可直接 `docker build` 的顶层 Dockerfile，因此不在此编排。
 
 services:
-  # ==================== DeerFlow ====================
-  deerflow:
-    build:
-      context: ../deer-flow
-      dockerfile: Dockerfile
-    ports:
-      - "8001:8001"
-      - "2024:2024"
-      - "2026:2026"
-    environment:
-      - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY}
-      - OPENAI_API_KEY=${OPENAI_API_KEY:-}
-    volumes:
-      - deerflow_data:/app/data
-    networks:
-      - deerharness
-
-  # ==================== PenguinHarness ====================
-  penguin:
-    build:
-      context: ../penguin-harness
-      dockerfile: Dockerfile
-    ports:
-      - "7364:7364"
-    environment:
-      - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY}
-    volumes:
-      - penguin_data:/app/data
-    networks:
-      - deerharness
-
   # ==================== DeerHarness Gateway ====================
   gateway:
     build:
@@ -40,15 +18,14 @@ services:
     ports:
       - "8080:8080"
     environment:
-      - DEERFLOW_API=http://deerflow:8001
-      - PENGUIN_API=http://penguin:7364
-    depends_on:
-      - deerflow
-      - penguin
+      - PENGUIN_API=http://host.docker.internal:7368
+      - PENGUIN_USER_ID=admin
+      - PENGUIN_PASSWORD=${PENGUIN_PASSWORD:-penguin-3983}
+      - DEERFLOW_API=http://host.docker.internal:2026
     volumes:
       - gateway_config:/app/config
-    networks:
-      - deerharness
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
 
   # ==================== DeerHarness WebUI ====================
   web:
@@ -61,14 +38,10 @@ services:
       - NEXT_PUBLIC_GATEWAY_URL=http://localhost:8080
     depends_on:
       - gateway
-    networks:
-      - deerharness
 
 volumes:
-  deerflow_data:
-  penguin_data:
   gateway_config:
 
 networks:
-  deerharness:
+  default:
     driver: bridge

@@ -69,23 +69,23 @@ DeerHarness/
 
 ## 🚀 快速开始
 
-### Docker 一键部署（推荐）
+### Docker 一键部署（DeerHarness 自有服务）
 
 ```bash
-# 1. 准备上游仓库（docker-compose 引用同级目录）
-#    ../deer-flow  ← 克隆自 https://github.com/bytedance/deer-flow
-#    ../penguin-harness ← 克隆自 https://github.com/Prism-Shadow/penguin-harness
+# 1. 配置环境变量
+cp .env.example .env   # 可选：PENGUIN_PASSWORD 指向真实 penguin 密码
 
-# 2. 配置环境变量
-cp .env.example .env   # 填入 DEEPSEEK_API_KEY 等
+# 2. 启动 Gateway + WebUI
+make up                # 等价于 docker compose up -d --build
 
-# 3. 启动全部服务
-make up                # 等价于 docker compose up -d
-
-# 4. 访问
+# 3. 访问
 #    WebUI:     http://localhost:3000
 #    Gateway:   http://localhost:8080/api/health
 ```
+
+> **上游服务**（DeerFlow / PenguinHarness）通过各自的官方方式启动，见下方"真实上游联调"：
+> - DeerFlow 官方栈：`cd ../deer-flow && docker compose -f docker/docker-compose.yaml up -d`（nginx 前门 :2026）
+> - PenguinHarness 开发模式：`cd ../penguin-harness && pnpm install && pnpm dev:server`（:7368）
 
 ### 开发模式（不用 Docker）
 

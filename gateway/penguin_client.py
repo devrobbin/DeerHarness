@@ -31,7 +31,9 @@ class PenguinClient:
     """带自动登录的 penguin-harness HTTP 客户端（单例使用）。"""
 
     def __init__(self) -> None:
-        self._client = httpx.AsyncClient(base_url=PENGUIN_API, timeout=30.0)
+        # trust_env=False：本机 Windows 系统代理（如 Clash :7890）会拦截回环
+        # 地址请求并返回 502，本地服务必须直连
+        self._client = httpx.AsyncClient(base_url=PENGUIN_API, timeout=30.0, trust_env=False)
         self._lock = asyncio.Lock()
         self._logged_in = False
 
