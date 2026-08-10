@@ -5,6 +5,7 @@ import { AgentBuilder } from '@/components/agent-studio/AgentBuilder';
 import { AgentTraceViewer } from '@/components/agent-studio/AgentTraceViewer';
 import { AgentCostPanel } from '@/components/agent-studio/AgentCostPanel';
 import { AgentChat } from '@/components/agent-studio/AgentChat';
+import { TeamOrchestrator } from '@/components/agent-studio/TeamOrchestrator';
 
 export default function StudioPage() {
   return (
@@ -18,6 +19,7 @@ export default function StudioPage() {
         <div className="space-y-6">
           <AgentBuilder />
           <AgentChat />
+          <TeamOrchestrator />
           <AgentCostPanel />
         </div>
       </div>
