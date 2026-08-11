@@ -256,6 +256,7 @@ class TestEvolutionStore:
     def test_override_roundtrip(self, tmp_path, monkeypatch):
         import evolution_store as es
         monkeypatch.setattr(es, "DB_FILE", str(tmp_path / "evo.db"))
+        monkeypatch.setattr(es, "_initialized", False)
         es.init_db()
         v1 = es.set_override("amazon-ops", "ad-review", "workflow_task", "", "新任务模板A")
         assert v1 == 1
@@ -275,6 +276,7 @@ class TestEvolutionStore:
     def test_approval_flow(self, tmp_path, monkeypatch):
         import evolution_store as es
         monkeypatch.setattr(es, "DB_FILE", str(tmp_path / "evo.db"))
+        monkeypatch.setattr(es, "_initialized", False)
         es.init_db()
         task_id = "evolve-test-1"
         es.create_task(task_id, "workflow", team_id="amazon-ops", workflow_id="ad-review")
@@ -292,3 +294,74 @@ class TestEvolutionStore:
         es.update_task(task_id, status="waiting_approval", current_round=1)
         t = es.get_task(task_id)
         assert t["status"] == "waiting_approval" and t["current_round"] == 1
+
+
+class TestEvolutionStoreNullSentinel:
+    """P0-7: NULL 唯一性修复 — 同键 soul 二次覆盖必须覆盖旧值。"""
+
+    def test_soul_double_override(self, tmp_path, monkeypatch):
+        import evolution_store as es
+        monkeypatch.setattr(es, "DB_FILE", str(tmp_path / "evo.db"))
+        monkeypatch.setattr(es, "_initialized", False)
+        es.init_db()
+        v1 = es.set_override("amazon-ops", None, "soul", "", "soul-A")
+        v2 = es.set_override("amazon-ops", None, "soul", "", "soul-B")
+        assert v1 == 1 and v2 == 2  # 同键版本递增（NULL 哨兵生效）
+        assert es.get_effective_soul("amazon-ops", "base") == "soul-B"  # 读取最新
+        rows = es.list_overrides()
+        assert len(rows) == 1  # 不无限插行
+
+
+class TestSettingsGuards:
+    """P0-3/P1-1/P1-3: SSRF 私网禁 + 环境密钥域名白名单。"""
+
+    def test_private_net_rejected(self):
+        from routes.settings import _validate_test_url
+        from fastapi import HTTPException
+        for bad in ["http://127.0.0.1:8080/x", "http://169.254.169.254/latest/meta-data", "http://192.168.1.1/"]:
+            try:
+                _validate_test_url(bad)
+                raise AssertionError(f"应拒绝: {bad}")
+            except HTTPException:
+                pass
+
+    def test_public_url_allowed(self):
+        from routes.settings import _validate_test_url
+        _validate_test_url("https://open.feishu.cn/open-apis/bot/v2/hook/x")
+
+    def test_env_key_requires_official_host(self, monkeypatch):
+        from routes.settings import _resolve_model_test_key
+        from fastapi import HTTPException
+        monkeypatch.setenv("DEEPSEEK_API_KEY", "env-key-123")
+
+        class Req:
+            api_key = None
+            api_key_env = "DEEPSEEK_API_KEY"
+        # 攻击者域名 + 环境密钥 → 拒绝
+        try:
+            _resolve_model_test_key(Req(), "deepseek", "https://attacker.example.com")
+            raise AssertionError("应拒绝环境密钥发往非官方域名")
+        except HTTPException:
+            pass
+        # 官方域名 → 放行
+        assert _resolve_model_test_key(Req(), "deepseek", "https://api.deepseek.com") == "env-key-123"
+        # 显式 key → 任意域名放行（用户自己的密钥）
+        class Req2:
+            api_key = "user-key"
+            api_key_env = None
+        assert _resolve_model_test_key(Req2(), "deepseek", "https://attacker.example.com") == "user-key"
+
+    def test_rbac_dependencies_present(self):
+        """P0-2: 写端点必须挂角色依赖。"""
+        import inspect
+        from routes.settings import update_safety, add_mcp_server, test_model
+        from routes.evolution import evolution_approve, evolution_start
+        from routes.fusion import fusion_team_sync, fusion_team_run
+        sig = lambda f: str(inspect.signature(f))
+        assert "require_admin" in sig(update_safety)
+        assert "require_admin" in sig(add_mcp_server)
+        assert "require_admin" in sig(test_model)
+        assert "require_admin" in sig(evolution_approve)
+        assert "require_developer" in sig(evolution_start)
+        assert "require_admin" in sig(fusion_team_sync)
+        assert "require_developer" in sig(fusion_team_run)

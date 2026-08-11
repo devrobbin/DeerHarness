@@ -1,3 +1,5 @@
+from __future__ import annotations
+from auth import User, require_admin, require_developer
 """Fusion Bridge：PenguinHarness 造 Agent → DeerFlow 运行时执行。
 
 这才是真正的"融合"，而非门户聚合：
@@ -11,7 +13,6 @@
 - 主代理（lead agent）通过 task 工具按名动态分派子任务（可并行），汇总结果
 """
 
-from __future__ import annotations
 
 import asyncio
 import hashlib
@@ -26,7 +27,7 @@ from typing import Optional
 
 import httpx
 import yaml as _yaml
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel
 
 import config
@@ -224,7 +225,7 @@ async def _sync_agent(agent_id: str, project_id: str) -> str:
 
 
 @router.post("/sync")
-async def fusion_sync(req: FusionSyncRequest):
+async def fusion_sync(req: FusionSyncRequest, user: User = Depends(require_admin)):
     """同步单个 penguin Agent 到 DeerFlow（幂等）。"""
     project_id = req.project_id or "default_project"
     name = await _sync_agent(req.agent_id, project_id)
@@ -232,7 +233,7 @@ async def fusion_sync(req: FusionSyncRequest):
 
 
 @router.post("/sync-all")
-async def fusion_sync_all():
+async def fusion_sync_all(user: User = Depends(require_admin)):
     """同步全部 penguin Agent 到 DeerFlow。"""
     from .agents import _all_agents
 
@@ -250,7 +251,7 @@ async def fusion_sync_all():
 
 
 @router.post("/chat")
-async def fusion_chat(req: FusionChatRequest):
+async def fusion_chat(req: FusionChatRequest, user: User = Depends(require_developer)):
     """DeerFlow 运行时执行 penguin Agent：自动同步 → run（assistant_id）→ 轮询回复。
 
     多轮会话（评审 B）：复用 thread_id 保留上下文，DeerFlow 压缩机制生效。
@@ -316,6 +317,7 @@ async def fusion_chat(req: FusionChatRequest):
 
 class FusionTeamSyncRequest(BaseModel):
     agent_id: Optional[str] = None  # 指定单个；None = 全部
+    template: Optional[str] = None  # 团队模板：限定成员班底 + 应用成员人设覆盖
 
 
 class FusionTeamRunRequest(BaseModel):
@@ -673,19 +675,21 @@ def _wait_deerflow_ready(timeout_s: float = 60.0) -> None:
 
 
 @router.post("/team/sync")
-async def fusion_team_sync(req: Optional[FusionTeamSyncRequest] = None):
+async def fusion_team_sync(req: Optional[FusionTeamSyncRequest] = None, user: User = Depends(require_admin)):
     """把全部（或指定）penguin Agent 注册为 DeerFlow 子代理团队并生效。"""
     team = await _read_penguin_agent_defs()
+    if req and req.template:
+        spec = TEAM_TEMPLATES.get(req.template) or {}
+        allowed = spec.get("members")
+        if allowed is not None:
+            team = [m for m in team if m["agent_id"] in allowed]
     if req and req.agent_id:
         req.agent_id = valid_id(req.agent_id, "agent_id")
         team = [m for m in team if m["agent_id"] == req.agent_id]
         if not team:
             raise HTTPException(status_code=404, detail="Agent 不存在")
-    if template:
-        for m in team:
-            effective = evolution_store.get_effective_member_prompt(m["agent_id"], m["system_prompt"], template)
-            if effective != m["system_prompt"]:
-                m["system_prompt"] = effective
+    if req and req.template:
+        _apply_member_overrides(team, req.template)
 
     synced, changed = _write_subagents_config(team)
     if changed:
@@ -774,7 +778,7 @@ class FusionEvaluateRequest(BaseModel):
 
 
 @router.post("/evaluate")
-async def fusion_evaluate(req: FusionEvaluateRequest):
+async def fusion_evaluate(req: FusionEvaluateRequest, user: User = Depends(require_developer)):
     """进化闭环：执行轨迹 → 评测打分（评审遗留的闭环前半程）。
 
     流程：
@@ -984,6 +988,19 @@ def _register_team_run(thread_id: str, team: list[dict]) -> None:
     _TEAM_RUNS[thread_id] = {"team": team, "started_at": now}
 
 
+def _apply_member_overrides(team: list[dict], template: str) -> None:
+    """应用团队成员人设覆盖（进化产物）到同步前的 team 定义。
+
+    收敛点：_prepare_team / fusion_team_sync / 进化团队评测 共用此注入。
+    """
+    for m in team:
+        effective = evolution_store.get_effective_member_prompt(
+            m["agent_id"], m["system_prompt"], template
+        )
+        if effective != m["system_prompt"]:
+            m["system_prompt"] = effective
+
+
 async def _prepare_team(
     template: str | None, agent_ids: list[str] | None, task: str, workflow: str | None
 ) -> tuple[list[dict], str | None, str, list[str]]:
@@ -1010,6 +1027,9 @@ async def _prepare_team(
     task = _resolve_workflow_task(template, workflow, task)
     if not task.strip():
         raise HTTPException(status_code=400, detail="任务内容为空")
+
+    if template:
+        _apply_member_overrides(team, template)
 
     synced, changed = _write_subagents_config(team)
     if changed:
@@ -1145,7 +1165,7 @@ def _parse_team_progress(state: dict, team: list[dict]) -> dict:
 
 
 @router.post("/team/run")
-async def fusion_team_run(req: FusionTeamRunRequest):
+async def fusion_team_run(req: FusionTeamRunRequest, user: User = Depends(require_developer)):
     """团队编排（阻塞版）：主代理（DeerFlow）按需把子任务分派给团队成员（penguin Agent）。
 
     - 自动同步团队配置并重启使生效（首次调用）
@@ -1213,7 +1233,7 @@ class FusionTeamStartRequest(BaseModel):
 
 
 @router.post("/team/start")
-async def fusion_team_start(req: FusionTeamStartRequest):
+async def fusion_team_start(req: FusionTeamStartRequest, user: User = Depends(require_developer)):
     """团队编排（非阻塞版）：立即返回 thread_id，前端轮询 /team/status 展示实时进度。
 
     与 team/run 共享同一套准备逻辑（成员过滤 + 配置同步 + 主代理同步）。

@@ -1,3 +1,5 @@
+from __future__ import annotations
+from auth import User, require_admin, require_developer
 """进化实验室：agent / workflow / team 三层进化，审批队列闭环。
 
 闭环：评估 → LLM 改进建议 → 审批门（require_human_approval）→ 应用 → 下一轮复测。
@@ -9,7 +11,6 @@
 实时进度通过 WS 频道 evolution:{task_id} 推送（LiveEvolutionTracker / EvolutionLog 消费）。
 """
 
-from __future__ import annotations
 
 import asyncio
 import json
@@ -19,7 +20,7 @@ import uuid
 from typing import Optional
 
 import httpx
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel
 
 import config
@@ -109,6 +110,8 @@ async def _resolve_evolution_target(task: dict) -> tuple[str, list[dict], bool]:
     allowed = spec.get("members")
     if allowed is not None:
         team = [m for m in team if m["agent_id"] in allowed]
+    from .fusion import _apply_member_overrides
+    _apply_member_overrides(team, team_id)
     synced, changed = _write_subagents_config(team)
     if changed:
         _restart_deerflow_gateway()
@@ -254,8 +257,19 @@ async def _apply_proposal(task_id: str, proposal: dict) -> None:
         summary = f"主代理 soul v{v}：{reason}"
     elif target == "member_prompt":
         member = proposal.get("member_id", "") or task["agent_id"] or ""
-        v = store.set_override(task["team_id"], None, "member_prompt", member, new_text)
-        summary = f"成员人设 {member} v{v}：{reason}"
+        if task["target_type"] == "agent":
+            # agent 型进化：直接写回 penguin agent config（_sync_agent 下次同步即生效）
+            from .agents import _find_agent_project, _proxy as _agents_proxy
+            project_id = await _find_agent_project(member)
+            await _agents_proxy(
+                "PUT",
+                f"/api/projects/{project_id}/agents/{member}/config",
+                json={"config": {"systemPrompt": new_text}},
+            )
+            summary = f"Agent 人设 {member}：{reason}"
+        else:
+            v = store.set_override(task["team_id"], None, "member_prompt", member, new_text)
+            summary = f"成员人设 {member} v{v}：{reason}"
     else:
         summary = "无改进"
     store.record_version(
@@ -378,7 +392,7 @@ async def _advance_inner(task_id: str) -> None:
 
 
 @router.post("/start")
-async def evolution_start(req: EvolutionStartRequest):
+async def evolution_start(req: EvolutionStartRequest, user: User = Depends(require_developer)):
     """启动进化任务（后台逐轮推进；审批模式下每轮挂起等审批）。"""
     if req.target_type not in ("agent", "workflow", "team"):
         raise HTTPException(status_code=400, detail="target_type 必须为 agent / workflow / team")
@@ -465,7 +479,7 @@ async def evolution_approvals(task_id: str):
 
 
 @router.post("/tasks/{task_id}/approve")
-async def evolution_approve(task_id: str, req: ApprovalRequest):
+async def evolution_approve(task_id: str, req: ApprovalRequest, user: User = Depends(require_admin)):
     """审批通过：应用改进方案并继续下一轮。"""
     task = store.get_task(task_id)
     if not task:
@@ -486,7 +500,7 @@ async def evolution_approve(task_id: str, req: ApprovalRequest):
 
 
 @router.post("/tasks/{task_id}/reject")
-async def evolution_reject(task_id: str, req: ApprovalRequest):
+async def evolution_reject(task_id: str, req: ApprovalRequest, user: User = Depends(require_admin)):
     """拒绝改进方案：跳过本方案，继续下一轮评估。"""
     ok = store.set_approval_status(req.approval_id, "rejected")
     if not ok:
@@ -497,7 +511,7 @@ async def evolution_reject(task_id: str, req: ApprovalRequest):
 
 
 @router.post("/tasks/{task_id}/stop")
-async def evolution_stop(task_id: str):
+async def evolution_stop(task_id: str, user: User = Depends(require_developer)):
     """停止进化任务。"""
     if not store.get_task(task_id):
         raise HTTPException(status_code=404, detail="进化任务不存在")

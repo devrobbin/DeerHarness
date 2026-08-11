@@ -84,12 +84,13 @@ async def dashboard_summary():
         start, end = now - (i + 1) * day_sec, now - i * day_sec
         day_cost = round(sum(float(t.get("cost") or 0) for t in traces if start <= (t.get("received_at") or 0) < end), 4)
         daily.append({"day": _time.strftime("%m-%d", _time.localtime(start)), "cost": day_cost})
+    # list_traces 按 received_at DESC → 取前 8 条即最新（修复：[-8:] 取到最旧 8 条）
     eval_traces = [
         {"agent_id": t.get("agent_id"), "score": t.get("score"), "received_at": t.get("received_at")}
         for t in traces
         if (str(t.get("agent_id", "")).startswith("eval:") or str(t.get("agent_id", "")).startswith("evolve:"))
         and t.get("score") is not None
-    ][-8:]
+    ][:8]
 
     # Agent 数量：真实 penguin 跨项目展开；服务不可达时降级为 0
     try:

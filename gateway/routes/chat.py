@@ -1,3 +1,5 @@
+from __future__ import annotations
+from auth import User, require_developer
 """Chat 路由：DeerHarness WebUI → DeerFlow 真实对话代理。
 
 流程（已按 DeerFlow 官方 API 实测）：
@@ -10,14 +12,13 @@
 解析出 AI 文本增量逐段返回，实现打字机效果。
 """
 
-from __future__ import annotations
 
 import json
 import time
 import uuid
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Depends
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
@@ -51,7 +52,7 @@ async def _proxy(method: str, path: str, **kwargs) -> dict:
 
 
 @router.post("/stream")
-async def chat_stream(req: ChatRequest):
+async def chat_stream(req: ChatRequest, user: User = Depends(require_developer)):
     """流式对话：转发 DeerFlow SSE，提取 AI 文本增量（打字机效果）。"""
     thread_id = req.thread_id or f"dh-chat-{uuid.uuid4().hex[:12]}"
     try:
@@ -167,7 +168,7 @@ async def get_thread_messages(thread_id: str):
 
 
 @router.post("")
-async def chat(req: ChatRequest):
+async def chat(req: ChatRequest, user: User = Depends(require_developer)):
     """发送一条消息并等待 DeerFlow 模型回复。"""
     thread_id = req.thread_id or f"dh-chat-{uuid.uuid4().hex[:12]}"
     try:

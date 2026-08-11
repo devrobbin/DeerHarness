@@ -1,3 +1,5 @@
+from __future__ import annotations
+from auth import User, require_developer
 """Agent Studio 路由：代理到 PenguinHarness 真实 API。
 
 真实 penguin-harness 的 Agent 模型（与千问框架假设不同）：
@@ -13,7 +15,6 @@
 响应中携带 project_id 供 WebUI 与删除操作使用。
 """
 
-from __future__ import annotations
 
 import asyncio
 import re
@@ -21,7 +22,7 @@ import time
 from typing import Optional
 
 import httpx
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel
 
 import config
@@ -90,7 +91,7 @@ async def list_agents():
 
 
 @router.post("")
-async def create_agent(req: AgentCreateRequest):
+async def create_agent(req: AgentCreateRequest, user: User = Depends(require_developer)):
     """创建 Agent：未指定项目时使用 default_project。"""
     project_id = req.project_id or DEFAULT_PROJECT
     body = {
@@ -197,7 +198,7 @@ async def get_agent_config(agent_id: str):
 
 
 @router.put("/{agent_id}/config")
-async def update_agent_config(agent_id: str, req: AgentConfigUpdate):
+async def update_agent_config(agent_id: str, req: AgentConfigUpdate, user: User = Depends(require_developer)):
     """更新 Agent 配置（部分更新，与上游契约一致：{config: {...}}）。"""
     project_id = await _find_agent_project(agent_id)
     body: dict = {}
@@ -239,7 +240,7 @@ async def get_agent_model_pref(agent_id: str):
 
 
 @router.put("/{agent_id}/model-pref")
-async def set_agent_model_pref(agent_id: str, req: ModelPrefRequest):
+async def set_agent_model_pref(agent_id: str, req: ModelPrefRequest, user: User = Depends(require_developer)):
     """设置/清除默认模型偏好（provider+model_id 都空 = 回落项目默认）。"""
     agent_id = valid_id(agent_id, "agent_id")
     await _find_agent_project(agent_id)  # 校验 agent 存在
@@ -259,7 +260,7 @@ class SkillInstallRequest(BaseModel):
 
 
 @router.post("/{agent_id}/skills")
-async def install_agent_skills(agent_id: str, req: SkillInstallRequest):
+async def install_agent_skills(agent_id: str, req: SkillInstallRequest, user: User = Depends(require_developer)):
     """安装技能（all-or-nothing）。"""
     project_id = await _find_agent_project(agent_id)
     return await _proxy(
@@ -270,7 +271,7 @@ async def install_agent_skills(agent_id: str, req: SkillInstallRequest):
 
 
 @router.delete("/{agent_id}/skills/{skill_name}")
-async def uninstall_agent_skill(agent_id: str, skill_name: str):
+async def uninstall_agent_skill(agent_id: str, skill_name: str, user: User = Depends(require_developer)):
     """卸载技能（penguin 返回 204 空 body，不能走 _proxy 的 JSON 解析）。"""
     project_id = await _find_agent_project(agent_id)
     skill_name = valid_id(skill_name, "skill_name")
@@ -302,7 +303,7 @@ async def get_agent_vault(agent_id: str):
 
 
 @router.put("/{agent_id}/vault")
-async def update_agent_vault(agent_id: str, req: VaultUpdateRequest):
+async def update_agent_vault(agent_id: str, req: VaultUpdateRequest, user: User = Depends(require_developer)):
     """整表替换 Vault（与 penguin 契约一致）。"""
     project_id = await _find_agent_project(agent_id)
     entries = [{"key": e.key, "value": e.value} if e.value is not None else {"key": e.key} for e in req.entries]
@@ -314,7 +315,7 @@ async def update_agent_vault(agent_id: str, req: VaultUpdateRequest):
 
 
 @router.delete("/{agent_id}")
-async def delete_agent(agent_id: str, project_id: str):
+async def delete_agent(agent_id: str, project_id: str, user: User = Depends(require_developer)):
     """删除 Agent（需指定所属项目）。"""
     agent_id = valid_id(agent_id, "agent_id")
     project_id = valid_id(project_id, "project_id")
@@ -329,7 +330,7 @@ class AgentChatRequest(BaseModel):
 
 
 @router.post("/{agent_id}/chat")
-async def chat_with_agent(agent_id: str, req: AgentChatRequest):
+async def chat_with_agent(agent_id: str, req: AgentChatRequest, user: User = Depends(require_developer)):
     """与 Agent 对话：建会话（可复用）→ 发消息 → 轮询模型回复。
 
     回复判定：轮询消息流直到出现比发送前更新的 ``model_msg`` 且文本非空。

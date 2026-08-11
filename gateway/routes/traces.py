@@ -1,10 +1,11 @@
+from auth import User, require_developer
 """Trace 数据流路由：采集（DeerFlow 上报 / 内部自动记录）→ 存储（SQLite）→ 查询。
 
 供 Dashboard / Monitor / 进化数据闭环使用。
 """
 
 import asyncio
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel
 from typing import Optional
 
@@ -57,7 +58,7 @@ def _publish_global(record: dict):
 
 
 @router.post("")
-async def ingest_trace(event: TraceEvent):
+async def ingest_trace(event: TraceEvent, user: User = Depends(require_developer)):
     """DeerFlow 执行完成后回调上报轨迹。"""
     record = trace_store.record_trace(
         event.agent_id,
@@ -112,7 +113,7 @@ async def get_trace(trace_id: str):
 
 
 @router.delete("/{trace_id}")
-async def delete_trace(trace_id: str):
+async def delete_trace(trace_id: str, user: User = Depends(require_developer)):
     trace_id = valid_id(trace_id, "trace_id")
     trace_store.delete_trace(trace_id)
     return {"success": True}

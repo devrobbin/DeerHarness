@@ -1,3 +1,4 @@
+from auth import User, require_admin
 """统一设置路由：模型 / 技能 / MCP / 渠道 / 安全策略 + 系统信息。
 
 移植自上游 WebUI：
@@ -9,7 +10,7 @@
 存储为 JSON 文件（gateway/config/settings.json），全部端点受 API Key 保护。
 """
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel
 from typing import Optional
 import asyncio
@@ -82,7 +83,7 @@ async def list_models():
 
 
 @router.post("/models")
-async def add_model(model: ModelConfig):
+async def add_model(model: ModelConfig, user: User = Depends(require_admin)):
     config = _load_config()
     config.setdefault("models", []).append(model.model_dump())
     _save_config(config)
@@ -90,7 +91,7 @@ async def add_model(model: ModelConfig):
 
 
 @router.put("/models/{model_id}")
-async def update_model(model_id: str, model: ModelConfig):
+async def update_model(model_id: str, model: ModelConfig, user: User = Depends(require_admin)):
     """编辑模型（移植 PenguinHarness ModelDialog 的完整字段）。"""
     config = _load_config()
     models = config.get("models", [])
@@ -103,7 +104,7 @@ async def update_model(model_id: str, model: ModelConfig):
 
 
 @router.delete("/models/{model_id}")
-async def delete_model(model_id: str):
+async def delete_model(model_id: str, user: User = Depends(require_admin)):
     config = _load_config()
     config["models"] = [m for m in config.get("models", []) if m["id"] != model_id]
     _save_config(config)
@@ -122,7 +123,7 @@ class ModelTestRequest(BaseModel):
 
 
 @router.post("/models/test")
-async def test_model(req: ModelTestRequest):
+async def test_model(req: ModelTestRequest, user: User = Depends(require_admin)):
     """真实 HTTP 探测模型连通性：最小 chat completion + 延迟测量。
 
     trust_env=False：避免本机系统代理拦截外网请求（与 penguin_client 一致）。
@@ -130,17 +131,8 @@ async def test_model(req: ModelTestRequest):
     base_url = (req.base_url or _PROVIDER_DEFAULTS.get(req.provider) or "").rstrip("/")
     if not base_url:
         raise HTTPException(status_code=400, detail="本地模型必须提供 base_url")
-
-    api_key = (
-        req.api_key
-        or (os.environ.get(req.api_key_env) if req.api_key_env else None)
-        or (config.DEEPSEEK_API_KEY if req.provider == "deepseek" else None)
-    )
-    if not api_key:
-        raise HTTPException(
-            status_code=400,
-            detail="未提供 API Key（可传入 api_key 或配置 api_key_env / DEEPSEEK_API_KEY）",
-        )
+    _validate_test_url(base_url)
+    api_key = _resolve_model_test_key(req, req.provider, base_url)
 
     headers = {"Authorization": f"Bearer {api_key}"}
     if req.provider == "anthropic":
@@ -190,7 +182,7 @@ async def list_skills():
 
 
 @router.post("/skills")
-async def add_skill(skill: SkillConfig):
+async def add_skill(skill: SkillConfig, user: User = Depends(require_admin)):
     config = _load_config()
     config.setdefault("skills", []).append(skill.model_dump())
     _save_config(config)
@@ -198,7 +190,7 @@ async def add_skill(skill: SkillConfig):
 
 
 @router.put("/skills/{skill_id}")
-async def update_skill(skill_id: str, skill: SkillConfig):
+async def update_skill(skill_id: str, skill: SkillConfig, user: User = Depends(require_admin)):
     config = _load_config()
     skills = config.get("skills", [])
     for i, s in enumerate(skills):
@@ -210,7 +202,7 @@ async def update_skill(skill_id: str, skill: SkillConfig):
 
 
 @router.delete("/skills/{skill_id}")
-async def delete_skill(skill_id: str):
+async def delete_skill(skill_id: str, user: User = Depends(require_admin)):
     config = _load_config()
     config["skills"] = [s for s in config.get("skills", []) if s["id"] != skill_id]
     _save_config(config)
@@ -237,7 +229,7 @@ async def list_mcp_servers():
 
 
 @router.post("/mcp")
-async def add_mcp_server(server: MCPServerConfig):
+async def add_mcp_server(server: MCPServerConfig, user: User = Depends(require_admin)):
     config = _load_config()
     config.setdefault("mcp_servers", []).append(server.model_dump())
     _save_config(config)
@@ -245,7 +237,7 @@ async def add_mcp_server(server: MCPServerConfig):
 
 
 @router.put("/mcp/{server_id}")
-async def update_mcp_server(server_id: str, server: MCPServerConfig):
+async def update_mcp_server(server_id: str, server: MCPServerConfig, user: User = Depends(require_admin)):
     config = _load_config()
     servers = config.get("mcp_servers", [])
     for i, s in enumerate(servers):
@@ -257,7 +249,7 @@ async def update_mcp_server(server_id: str, server: MCPServerConfig):
 
 
 @router.delete("/mcp/{server_id}")
-async def delete_mcp_server(server_id: str):
+async def delete_mcp_server(server_id: str, user: User = Depends(require_admin)):
     config = _load_config()
     config["mcp_servers"] = [s for s in config.get("mcp_servers", []) if s["id"] != server_id]
     _save_config(config)
@@ -288,7 +280,7 @@ def _test_stdio(command: str, env: dict) -> dict:
 
 
 @router.post("/mcp/{server_id}/test")
-async def test_mcp_server(server_id: str):
+async def test_mcp_server(server_id: str, user: User = Depends(require_admin)):
     config = _load_config()
     server = next((s for s in config.get("mcp_servers", []) if s["id"] == server_id), None)
     if not server:
@@ -298,6 +290,7 @@ async def test_mcp_server(server_id: str):
         url = server.get("url")
         if not url:
             raise HTTPException(status_code=400, detail="SSE 传输需要 URL")
+        _validate_test_url(url)
         try:
             async with httpx_async_client(timeout=8) as client:
                 start = time.perf_counter()
@@ -341,7 +334,7 @@ async def list_channels():
 
 
 @router.post("/channels")
-async def add_channel(channel: ChannelConfig):
+async def add_channel(channel: ChannelConfig, user: User = Depends(require_admin)):
     config = _load_config()
     config.setdefault("channels", []).append(channel.model_dump())
     _save_config(config)
@@ -349,7 +342,7 @@ async def add_channel(channel: ChannelConfig):
 
 
 @router.put("/channels/{channel_id}")
-async def update_channel(channel_id: str, channel: ChannelConfig):
+async def update_channel(channel_id: str, channel: ChannelConfig, user: User = Depends(require_admin)):
     config = _load_config()
     channels = config.get("channels", [])
     for i, c in enumerate(channels):
@@ -361,7 +354,7 @@ async def update_channel(channel_id: str, channel: ChannelConfig):
 
 
 @router.delete("/channels/{channel_id}")
-async def delete_channel(channel_id: str):
+async def delete_channel(channel_id: str, user: User = Depends(require_admin)):
     config = _load_config()
     config["channels"] = [c for c in config.get("channels", []) if c["id"] != channel_id]
     _save_config(config)
@@ -369,7 +362,7 @@ async def delete_channel(channel_id: str):
 
 
 @router.post("/channels/{channel_id}/test")
-async def test_channel(channel_id: str):
+async def test_channel(channel_id: str, user: User = Depends(require_admin)):
     """发送一条真实测试消息到 webhook（移植 DeerFlow channels 连接状态检查）。"""
     config = _load_config()
     channel = next((c for c in config.get("channels", []) if c["id"] == channel_id), None)
@@ -378,6 +371,7 @@ async def test_channel(channel_id: str):
     url = channel.get("webhook_url")
     if not url:
         raise HTTPException(status_code=400, detail="未配置 webhook_url")
+    _validate_test_url(url)
 
     text = f"DeerHarness 渠道连通性测试 ✅ {time.strftime('%Y-%m-%d %H:%M:%S')}"
     payload = (_CHANNEL_PAYLOADS.get(channel["type"]) or (lambda t: {"text": t}))(text)
@@ -408,11 +402,91 @@ async def get_safety():
 
 
 @router.put("/safety")
-async def update_safety(safety: SafetyConfig):
+async def update_safety(safety: SafetyConfig, user: User = Depends(require_admin)):
     config = _load_config()
     config["safety"] = safety.model_dump()
     _save_config(config)
     return {"success": True, "safety": safety.model_dump()}
+
+
+# ==================== 安全护栏（评审 P0-3/P1-1/P1-3） ====================
+
+import ipaddress as _ipaddress
+import socket as _socket
+
+# 预设 provider 官方域名：使用平台环境密钥（DEEPSEEK_API_KEY 等）时 base_url 必须命中
+_PROVIDER_HOSTS = {
+    "deepseek": ("api.deepseek.com", "api.deepseek.com"),
+    "openai": ("api.openai.com",),
+    "anthropic": ("api.anthropic.com",),
+}
+# openai/anthropic 默认 base_url 带 /v1 路径，host 校验只取主机名
+
+_PRIVATE_NETS = [
+    _ipaddress.ip_network("10.0.0.0/8"),
+    _ipaddress.ip_network("172.16.0.0/12"),
+    _ipaddress.ip_network("192.168.0.0/16"),
+    _ipaddress.ip_network("127.0.0.0/8"),
+    _ipaddress.ip_network("169.254.0.0/16"),
+    _ipaddress.ip_network("100.64.0.0/10"),
+    _ipaddress.ip_network("::1/128"),
+    _ipaddress.ip_network("fc00::/7"),
+    _ipaddress.ip_network("fe80::/10"),
+]
+
+
+def _host_of(url: str) -> str:
+    """从 URL 提取主机名（剥掉协议与端口/路径）。"""
+    url = (url or "").strip()
+    if "://" not in url:
+        url = "http://" + url
+    try:
+        from urllib.parse import urlparse
+        return urlparse(url).hostname or ""
+    except Exception:
+        return ""
+
+
+def _validate_test_url(url: str) -> None:
+    """SSRF 防护：拒绝私网/回环/链路本地/云元数据段（评审 P1-3）。"""
+    host = _host_of(url)
+    if not host:
+        raise HTTPException(status_code=400, detail="URL 无效")
+    try:
+        for addr in _socket.getaddrinfo(host, None):
+            ip = _ipaddress.ip_address(addr[4][0])
+            if any(ip in net for net in _PRIVATE_NETS):
+                raise HTTPException(status_code=400, detail=f"禁止访问私网/回环地址: {ip}")
+    except _socket.gaierror:
+        raise HTTPException(status_code=400, detail=f"域名解析失败: {host}")
+
+
+def _resolve_model_test_key(req, provider: str, base_url: str) -> str:
+    """模型测试密钥解析 + 防外泄（评审 P1-1）。
+
+    - 显式传入 api_key：用户自己的密钥，允许任意 base_url（风险自负）
+    - 环境密钥（api_key_env / DEEPSEEK_API_KEY）：base_url host 必须命中
+      对应 provider 官方域名，否则拒绝 —— 防止平台密钥被发往攻击者服务器
+    """
+    explicit = req.api_key
+    env_key = os.environ.get(req.api_key_env) if req.api_key_env else None
+    platform_key = config.DEEPSEEK_API_KEY if provider == "deepseek" else None
+    if explicit:
+        return explicit
+    if not env_key and not platform_key:
+        raise HTTPException(
+            status_code=400,
+            detail="未提供 API Key（可传入 api_key 或配置 api_key_env / DEEPSEEK_API_KEY）",
+        )
+    # 环境密钥 → 校验域名
+    allowed = _PROVIDER_HOSTS.get(provider)
+    host = _host_of(base_url)
+    if allowed and host not in allowed:
+        raise HTTPException(
+            status_code=400,
+            detail=f"环境密钥仅允许发送到 {provider} 官方域名（{allowed}），当前: {host}",
+        )
+    return env_key or platform_key
 
 
 # ==================== 系统信息 ====================

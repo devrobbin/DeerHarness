@@ -69,6 +69,7 @@ CREATE TABLE IF NOT EXISTS config_overrides (
 
 
 def _connect() -> sqlite3.Connection:
+    _ensure_initialized()
     os.makedirs(os.path.dirname(DB_FILE), exist_ok=True)
     conn = sqlite3.connect(DB_FILE, timeout=15)
     conn.row_factory = sqlite3.Row
@@ -86,7 +87,37 @@ def init_db():
             conn.close()
 
 
-init_db()
+_initialized = False
+
+
+def _migrate_legacy_nulls(conn):
+    """迁移旧数据：历史 soul/成员覆盖的 workflow_id=NULL → ''（哨兵化）。"""
+    try:
+        conn.execute("UPDATE config_overrides SET workflow_id='' WHERE workflow_id IS NULL")
+        conn.commit()
+    except sqlite3.Error:
+        pass
+
+
+def _ensure_initialized():
+    """懒初始化：首次访问时建表（修复：import 副作用污染真实库）。"""
+    global _initialized
+    if _initialized:
+        return
+    with _lock:
+        if not _initialized:
+            conn = sqlite3.connect(DB_FILE, timeout=15)
+            try:
+                conn.executescript(_SCHEMA)
+                _migrate_legacy_nulls(conn)
+            finally:
+                conn.close()
+            _initialized = True
+
+
+def init_db():
+    """显式初始化（测试用：monkeypatch DB_FILE 后调用）。"""
+    _ensure_initialized()
 
 
 # ==================== 进化任务 ====================
@@ -239,13 +270,18 @@ def set_approval_status(approval_id: int, status: str) -> bool:
 
 def set_override(team_id: str, workflow_id: Optional[str], field: str,
                  member_id: str, value: str) -> int:
-    """写入配置覆盖，返回新版本号。workflow_id=None + field=soul = 团队主代理覆盖。"""
+    """写入配置覆盖，返回新版本号。workflow_id=None + field=soul = 团队主代理覆盖。
+
+    哨兵约定：workflow_id 用 '' 而非 NULL —— SQLite UNIQUE 约束对 NULL 互不相等，
+    会导致 soul 等无 workflow 的覆盖二次写入永远插新行、读取永远命中旧值。
+    """
+    wf = workflow_id or ""
     with _lock:
         conn = _connect()
         try:
             row = conn.execute(
-                "SELECT version FROM config_overrides WHERE team_id=? AND workflow_id IS ? AND field=? AND member_id=?",
-                (team_id, workflow_id, field, member_id),
+                "SELECT version FROM config_overrides WHERE team_id=? AND workflow_id=? AND field=? AND member_id=?",
+                (team_id, wf, field, member_id),
             ).fetchone()
             version = (row["version"] + 1) if row else 1
             conn.execute(
@@ -253,7 +289,7 @@ def set_override(team_id: str, workflow_id: Optional[str], field: str,
                 " VALUES (?,?,?,?,?,?,?)"
                 " ON CONFLICT(team_id, workflow_id, field, member_id) DO UPDATE SET value=excluded.value,"
                 " version=excluded.version, applied_at=excluded.applied_at",
-                (team_id, workflow_id, field, member_id, value, version, time.time()),
+                (team_id, wf, field, member_id, value, version, time.time()),
             )
             conn.commit()
             return version
@@ -264,11 +300,12 @@ def set_override(team_id: str, workflow_id: Optional[str], field: str,
 def get_override(team_id: str, workflow_id: Optional[str], field: str,
                  member_id: str = "") -> Optional[str]:
     """读取覆盖值；不存在返回 None（调用方回退基础模板）。"""
+    wf = workflow_id or ""
     conn = _connect()
     try:
         row = conn.execute(
-            "SELECT value FROM config_overrides WHERE team_id=? AND workflow_id IS ? AND field=? AND member_id=?",
-            (team_id, workflow_id, field, member_id),
+            "SELECT value FROM config_overrides WHERE team_id=? AND workflow_id=? AND field=? AND member_id=?",
+            (team_id, wf, field, member_id),
         ).fetchone()
         return row["value"] if row else None
     finally:

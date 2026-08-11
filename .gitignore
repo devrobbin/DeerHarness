@@ -45,3 +45,14 @@ gateway/config/traces.db-*
 gateway/config/users.json
 gateway/config/settings.json
 gateway/config/traces.db*
+
+# 运行时数据（评审 P0-6：不入库）
+config/*.db
+config/*.db-shm
+config/*.db-wal
+gateway/config/*.db
+gateway/config/*.db-shm
+gateway/config/*.db-wal
+gateway/config/agent_prefs.json
+gateway/config/users.json
+gateway/config/settings.json
