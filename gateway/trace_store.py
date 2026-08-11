@@ -24,6 +24,7 @@ def _get_conn() -> sqlite3.Connection:
         os.makedirs(os.path.dirname(_DB_FILE), exist_ok=True)
         _conn = sqlite3.connect(_DB_FILE, check_same_thread=False, timeout=30)
         _conn.execute("PRAGMA journal_mode=WAL")
+        _conn.execute("PRAGMA user_version=1")
         _conn.execute(
             """
             CREATE TABLE IF NOT EXISTS traces (

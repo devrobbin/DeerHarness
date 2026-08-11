@@ -154,7 +154,7 @@ export default function MonitorPage() {
         <div className="flex items-center gap-3">
           <span className={`flex items-center gap-1 text-sm ${connected ? 'text-green-500' : 'text-red-400'}`}>
             <span className={`h-2 w-2 rounded-full ${connected ? 'bg-green-500 animate-pulse' : 'bg-red-400'}`} />
-            {connected ? '实时连接' : '离线'}
+            {connected ? t.monitor.liveConnected : t.monitor.offline}
           </span>
           <button onClick={load} className="rounded bg-gray-800 px-4 py-2 text-sm text-white hover:bg-gray-700">
             刷新
@@ -165,7 +165,7 @@ export default function MonitorPage() {
       {/* 第一行：健康 / 成本 / 进化 */}
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
         <div className={panel}>
-          <h2 className="mb-3 font-semibold dark:text-gray-100">🩺 服务健康</h2>
+          <h2 className="mb-3 font-semibold dark:text-gray-100">{t.monitor.health}</h2>
           {health && (
             <div className="space-y-2 text-sm">
               {Object.entries(health).map(([name, h]) => (
@@ -189,7 +189,7 @@ export default function MonitorPage() {
         </div>
 
         <div className={panel}>
-          <h2 className="mb-3 font-semibold dark:text-gray-100">💸 成本总览</h2>
+          <h2 className="mb-3 font-semibold dark:text-gray-100">{t.monitor.cost}</h2>
           {cost ? (
             <>
               <p className="mb-1 text-2xl font-bold text-amber-600">${cost.total_cost}</p>
@@ -210,7 +210,7 @@ export default function MonitorPage() {
         </div>
 
         <div className={panel}>
-          <h2 className="mb-3 font-semibold dark:text-gray-100">🧬 进化监控</h2>
+          <h2 className="mb-3 font-semibold dark:text-gray-100">{t.monitor.evolution}</h2>
           <div className="max-h-56 space-y-1.5 overflow-y-auto">
             {evolveTasks.slice(0, 8).map(task => {
               const b = EVOLVE_STATUS[task.status] ?? { text: task.status, color: 'gray' as const };
@@ -234,13 +234,13 @@ export default function MonitorPage() {
       {/* 第二行：团队编排监控 / 实时事件流 */}
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
         <div className={panel}>
-          <h2 className="mb-3 font-semibold dark:text-gray-100">🧭 团队编排监控</h2>
+          <h2 className="mb-3 font-semibold dark:text-gray-100">{t.monitor.team}</h2>
           <div className="mb-3 grid grid-cols-4 gap-2 text-center">
             {[
-              { label: '团队运行', value: teamStats.total },
-              { label: '分派次数', value: teamStats.delegations },
-              { label: '分派失败', value: teamStats.delegationsFailed },
-              { label: '失败率', value: teamStats.total ? `${Math.round((teamStats.failed / teamStats.total) * 100)}%` : '—' },
+              { label: t.monitor.teamRuns, value: teamStats.total },
+              { label: t.monitor.delegations, value: teamStats.delegations },
+              { label: t.monitor.delegFailed, value: teamStats.delegationsFailed },
+              { label: t.monitor.failRate, value: teamStats.total ? `${Math.round((teamStats.failed / teamStats.total) * 100)}%` : '—' },
             ].map(s => (
               <div key={s.label} className="rounded bg-gray-50 p-2 dark:bg-gray-700/50">
                 <p className="text-lg font-bold text-purple-600 dark:text-purple-400">{s.value}</p>
@@ -265,7 +265,7 @@ export default function MonitorPage() {
         </div>
 
         <div className={panel}>
-          <h2 className="mb-3 font-semibold dark:text-gray-100">🔴 实时事件流</h2>
+          <h2 className="mb-3 font-semibold dark:text-gray-100">{t.monitor.live}</h2>
           <div className="h-64 overflow-y-auto rounded bg-gray-900 p-3 font-mono text-[11px] leading-relaxed dark:bg-black">
             {liveTraces.map((e, i) => (
               <p key={i} className={e.status === 'failed' ? 'text-red-400' : e.agent_id.startsWith('eval') || e.agent_id.startsWith('evolve') ? 'text-purple-300' : 'text-green-300'}>
@@ -285,14 +285,14 @@ export default function MonitorPage() {
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
         <div className={`${panel} lg:col-span-2`}>
           <div className="mb-3 flex items-center justify-between">
-            <h2 className="font-semibold dark:text-gray-100">📜 Trace 数据流</h2>
+            <h2 className="font-semibold dark:text-gray-100">{t.monitor.traces}</h2>
             <div className="flex gap-2">
               <select value={typeFilter} onChange={e => setTypeFilter(e.target.value)} className="rounded border border-gray-300 p-1.5 text-xs dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100">
-                <option value="">全部类型</option>
+                <option value="">{t.monitor.allTypes}</option>
                 {Object.entries(TYPE_LABELS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
               </select>
               <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)} className="rounded border border-gray-300 p-1.5 text-xs dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100">
-                <option value="">全部状态</option>
+                <option value="">{t.monitor.allStatus}</option>
                 <option value="success">success</option>
                 <option value="failed">failed</option>
               </select>
@@ -335,7 +335,7 @@ export default function MonitorPage() {
 
         <div className={panel}>
           <div className="mb-3 flex items-center justify-between">
-            <h2 className="font-semibold dark:text-gray-100">🐧 PenguinHarness 真实轨迹</h2>
+            <h2 className="font-semibold dark:text-gray-100">{t.monitor.penguin}</h2>
             <select value={penguinAgent} onChange={e => setPenguinAgent(e.target.value)} className="rounded border border-gray-300 p-1.5 text-xs dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100">
               {agents.map(a => (
                 <option key={`${a.project_id}/${a.agentId}`} value={a.agentId}>{a.name}（{a.agentId}）</option>

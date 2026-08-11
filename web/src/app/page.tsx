@@ -68,14 +68,14 @@ export default function DashboardPage() {
 
   const cards = summary
     ? [
-        { label: 'Agent 数量', value: summary.agents, color: 'text-blue-600', icon: '🤖' },
-        { label: '任务总数', value: summary.tasks, color: 'text-gray-800 dark:text-gray-100', icon: '📋' },
-        { label: '成功', value: summary.tasks_success, color: 'text-green-600', icon: '✅' },
-        { label: '失败', value: summary.tasks_failed, color: 'text-red-500', icon: '❌' },
-        { label: 'Trace 数', value: summary.traces, color: 'text-purple-600', icon: '📜' },
-        { label: '总成本 ($)', value: summary.total_cost, color: 'text-amber-600', icon: '💰' },
-        { label: '团队运行', value: summary.team.runs, color: 'text-purple-600', icon: '🧭' },
-        { label: '待审批进化', value: pendingApprovals, color: 'text-amber-600', icon: '🛂' },
+        { label: t.dashboard.agents, value: summary.agents, color: 'text-blue-600', icon: '🤖' },
+        { label: t.dashboard.tasks, value: summary.tasks, color: 'text-gray-800 dark:text-gray-100', icon: '📋' },
+        { label: t.dashboard.success, value: summary.tasks_success, color: 'text-green-600', icon: '✅' },
+        { label: t.dashboard.failed, value: summary.tasks_failed, color: 'text-red-500', icon: '❌' },
+        { label: t.dashboard.traces, value: summary.traces, color: 'text-purple-600', icon: '📜' },
+        { label: t.dashboard.totalCost, value: summary.total_cost, color: 'text-amber-600', icon: '💰' },
+        { label: t.dashboard.teamRuns, value: summary.team.runs, color: 'text-purple-600', icon: '🧭' },
+        { label: t.dashboard.pendingApproval, value: pendingApprovals, color: 'text-amber-600', icon: '🛂' },
       ]
     : [];
 
@@ -126,7 +126,7 @@ export default function DashboardPage() {
       {/* 第二行：7 日成本趋势 / 评测得分 / 进化状态 */}
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
         <div className="rounded-lg border border-gray-200 bg-white p-4 dark:border-gray-700 dark:bg-gray-800">
-          <h2 className="mb-3 font-semibold dark:text-gray-100">📈 7 日成本趋势</h2>
+          <h2 className="mb-3 font-semibold dark:text-gray-100">{t.dashboard.costTrend}</h2>
           <div className="flex h-32 items-end gap-2">
             {(summary?.daily_cost ?? []).map(d => (
               <div key={d.day} className="flex flex-1 flex-col items-center gap-1">
@@ -143,7 +143,7 @@ export default function DashboardPage() {
         </div>
 
         <div className="rounded-lg border border-gray-200 bg-white p-4 dark:border-gray-700 dark:bg-gray-800">
-          <h2 className="mb-3 font-semibold dark:text-gray-100">🧬 评测得分走势（最近）</h2>
+          <h2 className="mb-3 font-semibold dark:text-gray-100">{t.dashboard.scoreTrend}</h2>
           <div className="space-y-1.5">
             {(summary?.recent_scores ?? []).slice().reverse().map((s, i) => (
               <div key={i} className="flex items-center gap-2">
@@ -162,7 +162,7 @@ export default function DashboardPage() {
         </div>
 
         <div className="rounded-lg border border-gray-200 bg-white p-4 dark:border-gray-700 dark:bg-gray-800">
-          <h2 className="mb-3 font-semibold dark:text-gray-100">🧭 团队编排</h2>
+          <h2 className="mb-3 font-semibold dark:text-gray-100">{t.dashboard.teamPanel}</h2>
           {summary && (
             <>
               <div className="grid grid-cols-3 gap-2 text-center">
@@ -195,8 +195,8 @@ export default function DashboardPage() {
       {/* 近期动态 */}
       <div className="rounded-lg border border-gray-200 bg-white p-4 dark:border-gray-700 dark:bg-gray-800">
         <div className="mb-3 flex items-center justify-between">
-          <h2 className="font-semibold dark:text-gray-100">⚡ 近期动态</h2>
-          <Link href="/monitor" className="text-xs text-blue-500 hover:text-blue-700">查看监控 →</Link>
+          <h2 className="font-semibold dark:text-gray-100">{t.dashboard.recent}</h2>
+          <Link href="/monitor" className="text-xs text-blue-500 hover:text-blue-700">{t.dashboard.viewMonitor}</Link>
         </div>
         <div className="space-y-1.5">
           {recent.map(x => {
@@ -214,7 +214,7 @@ export default function DashboardPage() {
               </div>
             );
           })}
-          {recent.length === 0 && <p className="text-sm text-gray-400">暂无动态（去对话/团队编排试试）</p>}
+          {recent.length === 0 && <p className="text-sm text-gray-400">{t.dashboard.noRecent}</p>}
         </div>
       </div>
     </div>
