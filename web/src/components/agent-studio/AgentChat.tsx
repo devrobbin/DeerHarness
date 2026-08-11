@@ -93,7 +93,7 @@ export function AgentChat() {
   };
 
   return (
-    <div className="flex h-[560px] flex-col rounded-lg border border-gray-200 bg-white p-4">
+    <div className="flex h-full flex-col rounded-lg border border-gray-200 bg-white p-4 dark:border-gray-700 dark:bg-gray-800">
       <div className="mb-3 flex items-center justify-between gap-2">
         <h2 className="font-semibold">💬 Agent 对话</h2>
         <select

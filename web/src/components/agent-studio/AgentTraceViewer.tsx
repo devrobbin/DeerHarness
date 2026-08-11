@@ -26,7 +26,7 @@ export function AgentTraceViewer() {
   }, [agentId]);
 
   return (
-    <div className="rounded-lg border border-gray-200 bg-white p-4">
+    <div className="h-full rounded-lg border border-gray-200 bg-white p-4 dark:border-gray-700 dark:bg-gray-800">
       <h2 className="mb-3 font-semibold">🔍 Trace 查看器</h2>
       <input
         placeholder="输入 Agent ID 查看执行轨迹"

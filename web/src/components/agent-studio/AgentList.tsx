@@ -40,7 +40,7 @@ export function AgentList() {
   };
 
   return (
-    <div className="rounded-lg border border-gray-200 bg-white p-4">
+    <div className="h-full rounded-lg border border-gray-200 bg-white p-4 dark:border-gray-700 dark:bg-gray-800">
       <div className="mb-3 flex items-center justify-between">
         <h2 className="font-semibold">🤖 Agent 列表</h2>
         <button onClick={fetchAgents} className="text-xs text-blue-500 hover:text-blue-700">刷新</button>

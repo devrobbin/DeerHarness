@@ -37,7 +37,7 @@ export function AgentBuilder() {
   };
 
   return (
-    <div className="rounded-lg border border-gray-200 bg-white p-4">
+    <div className="h-full rounded-lg border border-gray-200 bg-white p-4 dark:border-gray-700 dark:bg-gray-800">
       <h2 className="mb-3 font-semibold">🛠️ Agent Builder（一句话造 Agent）</h2>
       <form onSubmit={handleCreate} className="space-y-2">
         <input
