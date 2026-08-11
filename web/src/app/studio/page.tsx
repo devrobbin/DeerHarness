@@ -14,16 +14,15 @@ export default function StudioPage() {
     <div>
       <h1 className="mb-6 text-2xl font-bold">{t.nav.studio}</h1>
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-        <div className="space-y-6">
-          <AgentList />
+        <AgentList />
+        <AgentBuilder />
+        {/* 团队编排占满两列：编排过程 + 汇总需要大展示区 */}
+        <div className="lg:col-span-2">
           <TeamOrchestrator />
         </div>
-        <div className="space-y-6">
-          <AgentBuilder />
-          <AgentChat />
-          <AgentTraceViewer />
-          <AgentCostPanel />
-        </div>
+        <AgentChat />
+        <AgentTraceViewer />
+        <AgentCostPanel />
       </div>
     </div>
   );
