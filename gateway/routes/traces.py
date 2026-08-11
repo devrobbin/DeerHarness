@@ -3,6 +3,7 @@
 供 Dashboard / Monitor / 进化数据闭环使用。
 """
 
+import asyncio
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from typing import Optional
@@ -36,7 +37,23 @@ class TraceEvent(BaseModel):
 
 # 兼容旧导入（chat/fusion 路由引用）
 def record_trace(agent_id: str, status: str, **extra) -> dict:
-    return trace_store.record_trace(agent_id, status, **extra)
+    record = trace_store.record_trace(agent_id, status, **extra)
+    _publish_global(record)
+    return record
+
+
+def _publish_global(record: dict):
+    """把轨迹事件推送到 WS 全局频道（监控页实时事件流）。
+
+    在事件循环内异步发布；同步上下文（如测试）静默跳过。
+    """
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        return
+    from ws import push_event
+
+    loop.create_task(push_event("trace", record, "global"))
 
 
 @router.post("")
