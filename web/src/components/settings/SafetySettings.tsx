@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { apiGet, apiPut } from '@/lib/api';
+import { useI18n } from '@/lib/i18n';
 import { Button, Input } from '@/components/ui';
 
 interface Safety {
@@ -19,6 +20,7 @@ const DEFAULTS: Safety = {
 };
 
 export function SafetySettings() {
+  const { t } = useI18n();
   const [safety, setSafety] = useState<Safety>(DEFAULTS);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
@@ -54,19 +56,19 @@ export function SafetySettings() {
 
   return (
     <div>
-      <h2 className="text-lg font-semibold dark:text-gray-100">安全策略</h2>
-      <p className="mb-6 text-sm text-gray-500 dark:text-gray-400">控制 Agent 自进化的边界，防止失控</p>
+      <h2 className="text-lg font-semibold dark:text-gray-100">{t.safety.title}</h2>
+      <p className="mb-6 text-sm text-gray-500 dark:text-gray-400">{t.safety.description}</p>
 
       {error && <p className="mb-3 rounded bg-red-50 px-3 py-2 text-sm text-red-600 dark:bg-red-900/30 dark:text-red-400">{error}</p>}
 
       <div className="max-w-lg space-y-4">
         <div>
-          <label className={label}>最大进化轮次</label>
+          <label className={label}>{t.safety.maxRounds}</label>
           <Input type="number" value={safety.max_evolution_rounds} onChange={e => setSafety({ ...safety, max_evolution_rounds: +e.target.value })} />
         </div>
 
         <div>
-          <label className={label}>单次进化最大费用（USD）</label>
+          <label className={label}>{t.safety.maxCost}</label>
           <Input type="number" step="0.1" value={safety.max_cost_per_evolution} onChange={e => setSafety({ ...safety, max_cost_per_evolution: +e.target.value })} />
         </div>
 
@@ -77,20 +79,20 @@ export function SafetySettings() {
             onChange={e => setSafety({ ...safety, require_human_approval: e.target.checked })}
             className="h-4 w-4 accent-blue-500"
           />
-          <span className="text-sm text-gray-700 dark:text-gray-300">进化结果需要人工审批后才能部署</span>
+          <span className="text-sm text-gray-700 dark:text-gray-300">{t.safety.approval}</span>
         </label>
 
         <div>
-          <label className={label}>禁止进化的领域（逗号分隔）</label>
+          <label className={label}>{t.safety.blocked}</label>
           <Input
             value={safety.blocked_domains.join(', ')}
             onChange={e => setSafety({ ...safety, blocked_domains: e.target.value.split(',').map(s => s.trim()).filter(Boolean) })}
-            placeholder="例如：医疗, 法律, 金融"
+            placeholder={t.safety.blockedPlaceholder}
           />
         </div>
 
         <Button onClick={handleSave} disabled={saving}>
-          {saving ? '保存中...' : saved ? '✅ 已保存' : '保存设置'}
+          {saving ? t.safety.saving : saved ? t.safety.saved : t.safety.saveBtn}
         </Button>
       </div>
     </div>

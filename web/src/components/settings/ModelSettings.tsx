@@ -2,6 +2,7 @@
 
 import React, { useCallback, useEffect, useState } from 'react';
 import { apiDelete, apiGet, apiPost, apiPut } from '@/lib/api';
+import { useI18n } from '@/lib/i18n';
 import { Badge, Button, Card, Input, Spinner, tokens } from '@/components/ui';
 
 interface Model {
@@ -26,6 +27,7 @@ const PROVIDER_LABELS: Record<string, string> = {
 };
 
 export function ModelSettings() {
+  const { t } = useI18n();
   const [models, setModels] = useState<Model[]>([]);
   const [error, setError] = useState('');
   const [editing, setEditing] = useState<Model | 'new' | null>(null);
@@ -77,7 +79,7 @@ export function ModelSettings() {
   };
 
   const handleDelete = async (m: Model) => {
-    if (!window.confirm(`删除模型「${m.name}」？`)) return;
+    if (!window.confirm(t.models.deleteConfirm(m.name))) return;
     try {
       await apiDelete(`/api/settings/models/${m.id}`);
       await fetchModels();
@@ -106,8 +108,8 @@ export function ModelSettings() {
   return (
     <div>
       <div className="mb-4 flex items-center justify-between">
-        <h2 className="text-lg font-semibold dark:text-gray-100">模型管理</h2>
-        <Button onClick={openNew} disabled={editing !== null}>+ 添加模型</Button>
+        <h2 className="text-lg font-semibold dark:text-gray-100">{t.models.title}</h2>
+        <Button onClick={openNew} disabled={editing !== null}>{t.models.add}</Button>
       </div>
 
       {error && <p className="mb-3 rounded bg-red-50 px-3 py-2 text-sm text-red-600 dark:bg-red-900/30 dark:text-red-400">{error}</p>}
@@ -115,15 +117,15 @@ export function ModelSettings() {
       {editing && (
         <Card className="mb-6 space-y-3">
           <h3 className="text-sm font-medium text-gray-700 dark:text-gray-200">
-            {editing === 'new' ? '新增模型' : `编辑模型`}
+            {editing === 'new' ? t.models.new : t.models.edit}
           </h3>
           <form onSubmit={handleSave} className="grid grid-cols-2 gap-3">
             <div>
-              <label className="mb-1 block text-xs text-gray-500 dark:text-gray-400">模型名称（如 deepseek-chat）</label>
+              <label className="mb-1 block text-xs text-gray-500 dark:text-gray-400">{t.models.name}</label>
               <Input value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} required placeholder="deepseek-chat" />
             </div>
             <div>
-              <label className="mb-1 block text-xs text-gray-500 dark:text-gray-400">Provider</label>
+              <label className="mb-1 block text-xs text-gray-500 dark:text-gray-400">{t.models.provider}</label>
               <select
                 value={form.provider}
                 onChange={e => setForm({ ...form, provider: e.target.value })}
@@ -135,7 +137,7 @@ export function ModelSettings() {
               </select>
             </div>
             <div className="col-span-2">
-              <label className="mb-1 block text-xs text-gray-500 dark:text-gray-400">Base URL（留空使用默认）</label>
+              <label className="mb-1 block text-xs text-gray-500 dark:text-gray-400">{t.models.baseUrl}</label>
               <Input
                 value={form.base_url}
                 onChange={e => setForm({ ...form, base_url: e.target.value })}
@@ -143,7 +145,7 @@ export function ModelSettings() {
               />
             </div>
             <div>
-              <label className="mb-1 block text-xs text-gray-500 dark:text-gray-400">API Key 环境变量名（可选）</label>
+              <label className="mb-1 block text-xs text-gray-500 dark:text-gray-400">{t.models.apiKeyEnv}</label>
               <Input
                 value={form.api_key_env}
                 onChange={e => setForm({ ...form, api_key_env: e.target.value })}
@@ -152,17 +154,17 @@ export function ModelSettings() {
             </div>
             <div className="grid grid-cols-2 gap-3">
               <div>
-                <label className="mb-1 block text-xs text-gray-500 dark:text-gray-400">Max Tokens</label>
+                <label className="mb-1 block text-xs text-gray-500 dark:text-gray-400">{t.models.maxTokens}</label>
                 <Input type="number" value={form.max_tokens} onChange={e => setForm({ ...form, max_tokens: +e.target.value })} />
               </div>
               <div>
-                <label className="mb-1 block text-xs text-gray-500 dark:text-gray-400">Temperature</label>
+                <label className="mb-1 block text-xs text-gray-500 dark:text-gray-400">{t.models.temperature}</label>
                 <Input type="number" step="0.1" min="0" max="2" value={form.temperature} onChange={e => setForm({ ...form, temperature: +e.target.value })} />
               </div>
             </div>
             <div className="col-span-2 flex gap-2">
-              <Button type="submit" variant="primary">保存</Button>
-              <Button type="button" variant="ghost" onClick={() => setEditing(null)}>取消</Button>
+              <Button type="submit" variant="primary">{t.common.save}</Button>
+              <Button type="button" variant="ghost" onClick={() => setEditing(null)}>{t.common.cancel}</Button>
             </div>
           </form>
         </Card>
@@ -179,27 +181,27 @@ export function ModelSettings() {
                   <Badge color={m.provider === 'local' ? 'amber' : 'purple'}>{PROVIDER_LABELS[m.provider] || m.provider}</Badge>
                 </div>
                 <p className="mt-0.5 truncate text-xs text-gray-500 dark:text-gray-400">
-                  {m.base_url || '(默认地址)'} · max_tokens {m.max_tokens} · temp {m.temperature}
+                  {m.base_url || t.models.defaultAddr} · max_tokens {m.max_tokens} · temp {m.temperature}
                   {m.api_key_env ? ` · key:${m.api_key_env}` : ''}
                 </p>
                 {test && (
                   <p className={`mt-1 text-xs ${test.ok ? 'text-green-600 dark:text-green-400' : 'text-red-500 dark:text-red-400'}`}>
-                    {test.loading ? <Spinner label="测试中…" /> : `${test.ok ? '✅' : '❌'} ${test.message}`}
+                    {test.loading ? <Spinner label={t.common.testing} /> : `${test.ok ? '✅' : '❌'} ${test.message}`}
                   </p>
                 )}
               </div>
               <div className="flex shrink-0 items-center gap-2">
                 <Button variant="ghost" onClick={() => handleTest(m)} disabled={test?.loading}>
-                  {test?.ok ? '重测' : '测试连接'}
+                  {test?.ok ? t.common.retest : t.common.test}
                 </Button>
-                <Button variant="ghost" onClick={() => openEdit(m)}>编辑</Button>
-                <Button variant="danger" onClick={() => handleDelete(m)}>删除</Button>
+                <Button variant="ghost" onClick={() => openEdit(m)}>{t.common.edit}</Button>
+                <Button variant="danger" onClick={() => handleDelete(m)}>{t.common.delete}</Button>
               </div>
             </Card>
           );
         })}
         {models.length === 0 && (
-          <p className="py-8 text-center text-gray-400 dark:text-gray-500">暂无模型配置</p>
+          <p className="py-8 text-center text-gray-400 dark:text-gray-500">{t.models.empty}</p>
         )}
       </div>
     </div>

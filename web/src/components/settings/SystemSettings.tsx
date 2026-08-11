@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { apiGet } from '@/lib/api';
+import { useI18n } from '@/lib/i18n';
 import { Badge, Button, Card } from '@/components/ui';
 
 interface SystemInfo {
@@ -27,6 +28,7 @@ const STATUS_LABELS: Record<string, { text: string; color: 'green' | 'red' | 'am
 
 /** 系统信息：移植 DeerFlow about-settings + PenguinHarness 状态面板 */
 export function SystemSettings() {
+  const { t } = useI18n();
   const [info, setInfo] = useState<SystemInfo | null>(null);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
@@ -49,9 +51,9 @@ export function SystemSettings() {
   return (
     <div className="max-w-2xl space-y-4">
       <div className="flex items-center justify-between">
-        <h2 className="text-lg font-semibold dark:text-gray-100">系统信息</h2>
+        <h2 className="text-lg font-semibold dark:text-gray-100">{t.system.title}</h2>
         <Button variant="ghost" onClick={fetchInfo} disabled={loading}>
-          {loading ? '检测中…' : '刷新'}
+          {loading ? t.system.checking : t.system.refresh}
         </Button>
       </div>
 
@@ -60,7 +62,7 @@ export function SystemSettings() {
       {info && (
         <>
           <Card>
-            <h3 className="mb-3 text-sm font-medium text-gray-700 dark:text-gray-200">服务健康</h3>
+            <h3 className="mb-3 text-sm font-medium text-gray-700 dark:text-gray-200">{t.system.health}</h3>
             <div className="space-y-2">
               {Object.entries(info.health).map(([name, h]) => {
                 const s = STATUS_LABELS[h.status] || STATUS_LABELS.degraded;
@@ -81,10 +83,10 @@ export function SystemSettings() {
           </Card>
 
           <Card>
-            <h3 className="mb-3 text-sm font-medium text-gray-700 dark:text-gray-200">环境配置</h3>
+            <h3 className="mb-3 text-sm font-medium text-gray-700 dark:text-gray-200">{t.system.env}</h3>
             <dl className="space-y-2 text-sm">
               <div className="flex justify-between gap-4">
-                <dt className="shrink-0 text-gray-500 dark:text-gray-400">版本</dt>
+                <dt className="shrink-0 text-gray-500 dark:text-gray-400">{t.system.version}</dt>
                 <dd className="font-mono text-gray-800 dark:text-gray-100">{info.version}</dd>
               </div>
               <div className="flex justify-between gap-4">
@@ -100,23 +102,23 @@ export function SystemSettings() {
                 <dd className="truncate font-mono text-xs text-gray-800 dark:text-gray-100">{info.env.deerflow_config}</dd>
               </div>
               <div className="flex justify-between gap-4">
-                <dt className="shrink-0 text-gray-500 dark:text-gray-400">单请求预算</dt>
+                <dt className="shrink-0 text-gray-500 dark:text-gray-400">{t.system.budget}</dt>
                 <dd className="text-gray-800 dark:text-gray-100">${info.env.max_cost_per_request}</dd>
               </div>
               <div className="flex justify-between gap-4">
-                <dt className="shrink-0 text-gray-500 dark:text-gray-400">CORS 白名单</dt>
-                <dd className="truncate font-mono text-xs text-gray-800 dark:text-gray-100">{info.env.cors_origins.join(', ') || '(默认 localhost:3000)'}</dd>
+                <dt className="shrink-0 text-gray-500 dark:text-gray-400">{t.system.cors}</dt>
+                <dd className="truncate font-mono text-xs text-gray-800 dark:text-gray-100">{info.env.cors_origins.join(', ') || '(localhost:3000)'}</dd>
               </div>
               <div className="flex justify-between gap-4">
-                <dt className="shrink-0 text-gray-500 dark:text-gray-400">DeepSeek 评测 Key</dt>
-                <dd>{info.env.deepseek_key_set ? <Badge color="green">已配置</Badge> : <Badge color="amber">未配置</Badge>}</dd>
+                <dt className="shrink-0 text-gray-500 dark:text-gray-400">{t.system.deepseekKey}</dt>
+                <dd>{info.env.deepseek_key_set ? <Badge color="green">{t.system.configured}</Badge> : <Badge color="amber">{t.system.notConfigured}</Badge>}</dd>
               </div>
               <div className="flex justify-between gap-4">
-                <dt className="shrink-0 text-gray-500 dark:text-gray-400">管理员初始 Key</dt>
-                <dd>{info.env.admin_key_set ? <Badge color="green">已配置</Badge> : <Badge color="amber">未配置</Badge>}</dd>
+                <dt className="shrink-0 text-gray-500 dark:text-gray-400">{t.system.adminKey}</dt>
+                <dd>{info.env.admin_key_set ? <Badge color="green">{t.system.configured}</Badge> : <Badge color="amber">{t.system.notConfigured}</Badge>}</dd>
               </div>
             </dl>
-            <p className="mt-3 text-xs text-gray-400 dark:text-gray-500">密钥与密码仅显示"是否已配置"，不暴露原文</p>
+            <p className="mt-3 text-xs text-gray-400 dark:text-gray-500">{t.system.maskedHint}</p>
           </Card>
         </>
       )}

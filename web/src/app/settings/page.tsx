@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import { useI18n } from '@/lib/i18n';
 import { ModelSettings } from '@/components/settings/ModelSettings';
 import { SkillSettings } from '@/components/settings/SkillSettings';
 import { MCPSettings } from '@/components/settings/MCPSettings';
@@ -9,39 +10,54 @@ import { AccountSettings } from '@/components/settings/AccountSettings';
 import { UserAdmin } from '@/components/settings/UserAdmin';
 import { SafetySettings } from '@/components/settings/SafetySettings';
 import { SystemSettings } from '@/components/settings/SystemSettings';
+import { AppearanceSettings } from '@/components/settings/AppearanceSettings';
 
-const TABS = [
-  { id: 'models', label: '🧠 模型', component: ModelSettings },
-  { id: 'skills', label: '🔧 技能', component: SkillSettings },
-  { id: 'mcp', label: '🔌 MCP', component: MCPSettings },
-  { id: 'channels', label: '📡 渠道', component: ChannelSettings },
-  { id: 'account', label: '👤 账户', component: AccountSettings },
-  { id: 'users', label: '👥 用户', component: UserAdmin },
-  { id: 'safety', label: '🛡️ 安全', component: SafetySettings },
-  { id: 'system', label: 'ℹ️ 系统', component: SystemSettings },
-];
+const TAB_IDS = [
+  'models',
+  'skills',
+  'mcp',
+  'channels',
+  'account',
+  'users',
+  'safety',
+  'system',
+  'appearance',
+] as const;
+
+const COMPONENTS: Record<(typeof TAB_IDS)[number], () => JSX.Element> = {
+  models: ModelSettings,
+  skills: SkillSettings,
+  mcp: MCPSettings,
+  channels: ChannelSettings,
+  account: AccountSettings,
+  users: UserAdmin,
+  safety: SafetySettings,
+  system: SystemSettings,
+  appearance: AppearanceSettings,
+};
 
 export default function SettingsPage() {
-  const [activeTab, setActiveTab] = useState('models');
-  const ActiveComponent = TABS.find(t => t.id === activeTab)?.component || ModelSettings;
+  const { t } = useI18n();
+  const [activeTab, setActiveTab] = useState<(typeof TAB_IDS)[number]>('models');
+  const ActiveComponent = COMPONENTS[activeTab];
 
   return (
     <div className="flex h-full">
       {/* 左侧 Tab 导航 */}
       <div className="w-48 shrink-0 border-r border-gray-200 p-4 dark:border-gray-700">
-        <h1 className="mb-4 text-xl font-bold dark:text-gray-100">🛠️ Settings</h1>
+        <h1 className="mb-4 text-xl font-bold dark:text-gray-100">{t.settings.title}</h1>
         <div className="space-y-1">
-          {TABS.map(tab => (
+          {TAB_IDS.map(id => (
             <button
-              key={tab.id}
-              onClick={() => setActiveTab(tab.id)}
+              key={id}
+              onClick={() => setActiveTab(id)}
               className={`w-full rounded px-3 py-2 text-left text-sm transition ${
-                activeTab === tab.id
+                activeTab === id
                   ? 'bg-blue-100 font-medium text-blue-800 dark:bg-blue-900/40 dark:text-blue-300'
                   : 'text-gray-600 hover:bg-gray-100 dark:text-gray-400 dark:hover:bg-gray-800'
               }`}
             >
-              {tab.label}
+              {t.settings.tabs[id]}
             </button>
           ))}
         </div>

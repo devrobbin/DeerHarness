@@ -2,6 +2,7 @@
 
 import React, { useCallback, useEffect, useState } from 'react';
 import { apiDelete, apiGet, apiPost, apiPut } from '@/lib/api';
+import { useI18n } from '@/lib/i18n';
 import { Badge, Button, Card, Input, Spinner, tokens } from '@/components/ui';
 
 interface Channel {
@@ -22,6 +23,7 @@ const EMPTY_FORM = { type: 'feishu', name: '', webhook_url: '', bot_token: '' };
 
 /** 渠道集成：启用开关 + 测试消息移植 DeerFlow channels-settings（连接状态 + 操作按钮） */
 export function ChannelSettings() {
+  const { t } = useI18n();
   const [channels, setChannels] = useState<Channel[]>([]);
   const [error, setError] = useState('');
   const [editing, setEditing] = useState<Channel | 'new' | null>(null);
@@ -64,7 +66,7 @@ export function ChannelSettings() {
   };
 
   const handleDelete = async (c: Channel) => {
-    if (!window.confirm(`删除渠道「${c.name}」？`)) return;
+    if (!window.confirm(t.channels.deleteConfirm(c.name))) return;
     try {
       await apiDelete(`/api/settings/channels/${c.id}`);
       await fetchChannels();
@@ -96,39 +98,39 @@ export function ChannelSettings() {
   return (
     <div>
       <div className="mb-4 flex items-center justify-between">
-        <h2 className="text-lg font-semibold dark:text-gray-100">渠道集成</h2>
-        <Button onClick={openNew} disabled={editing !== null}>+ 添加渠道</Button>
+        <h2 className="text-lg font-semibold dark:text-gray-100">{t.channels.title}</h2>
+        <Button onClick={openNew} disabled={editing !== null}>{t.channels.add}</Button>
       </div>
 
       {error && <p className="mb-3 rounded bg-red-50 px-3 py-2 text-sm text-red-600 dark:bg-red-900/30 dark:text-red-400">{error}</p>}
 
       {editing && (
         <Card className="mb-6 space-y-3">
-          <h3 className="text-sm font-medium text-gray-700 dark:text-gray-200">{editing === 'new' ? '新增渠道' : '编辑渠道'}</h3>
+          <h3 className="text-sm font-medium text-gray-700 dark:text-gray-200">{editing === 'new' ? t.channels.new : t.channels.edit}</h3>
           <form onSubmit={handleSave} className="space-y-3">
             <div className="grid grid-cols-2 gap-3">
               <div>
-                <label className="mb-1 block text-xs text-gray-500 dark:text-gray-400">平台</label>
+                <label className="mb-1 block text-xs text-gray-500 dark:text-gray-400">{t.channels.platform}</label>
                 <select value={form.type} onChange={e => setForm({ ...form, type: e.target.value })} className={tokens.input}>
                   {Object.entries(CHANNEL_LABELS).map(([v, label]) => <option key={v} value={v}>{label}</option>)}
                 </select>
               </div>
               <div>
-                <label className="mb-1 block text-xs text-gray-500 dark:text-gray-400">名称</label>
+                <label className="mb-1 block text-xs text-gray-500 dark:text-gray-400">{t.channels.name}</label>
                 <Input value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} required />
               </div>
             </div>
             <div>
-              <label className="mb-1 block text-xs text-gray-500 dark:text-gray-400">Webhook URL</label>
+              <label className="mb-1 block text-xs text-gray-500 dark:text-gray-400">{t.channels.webhookUrl}</label>
               <Input value={form.webhook_url} onChange={e => setForm({ ...form, webhook_url: e.target.value })} placeholder="https://open.feishu.cn/open-apis/bot/v2/hook/..." />
             </div>
             <div>
-              <label className="mb-1 block text-xs text-gray-500 dark:text-gray-400">Bot Token（可选）</label>
+              <label className="mb-1 block text-xs text-gray-500 dark:text-gray-400">{t.channels.botToken}</label>
               <Input type="password" value={form.bot_token} onChange={e => setForm({ ...form, bot_token: e.target.value })} placeholder="用于签名校验的机器人令牌" />
             </div>
             <div className="flex gap-2">
-              <Button type="submit">保存</Button>
-              <Button type="button" variant="ghost" onClick={() => setEditing(null)}>取消</Button>
+              <Button type="submit">{t.common.save}</Button>
+              <Button type="button" variant="ghost" onClick={() => setEditing(null)}>{t.common.cancel}</Button>
             </div>
           </form>
         </Card>
@@ -143,34 +145,34 @@ export function ChannelSettings() {
                 <div className="flex items-center gap-2">
                   <span>{CHANNEL_ICONS[c.type] || '📡'}</span>
                   <span className={`truncate font-medium ${c.enabled ? 'text-gray-800 dark:text-gray-100' : 'text-gray-400 dark:text-gray-500'}`}>{c.name}</span>
-                  <Badge color={c.enabled ? 'green' : 'gray'}>{c.enabled ? '已启用' : '已禁用'}</Badge>
+                  <Badge color={c.enabled ? 'green' : 'gray'}>{c.enabled ? t.common.enabled : t.common.disabled}</Badge>
                   <Badge color="gray">{CHANNEL_LABELS[c.type] || c.type}</Badge>
                 </div>
-                <p className="mt-0.5 truncate text-xs text-gray-500 dark:text-gray-400">{c.webhook_url || '未配置 webhook'}</p>
+                <p className="mt-0.5 truncate text-xs text-gray-500 dark:text-gray-400">{c.webhook_url || t.channels.noWebhook}</p>
                 {test && (
                   <p className={`mt-1 text-xs ${test.ok ? 'text-green-600 dark:text-green-400' : 'text-red-500 dark:text-red-400'}`}>
-                    {test.loading ? <Spinner label="发送中…" /> : `${test.ok ? '✅' : '❌'} ${test.message}`}
+                    {test.loading ? <Spinner label={t.common.sending} /> : `${test.ok ? '✅' : '❌'} ${test.message}`}
                   </p>
                 )}
               </div>
               <div className="flex shrink-0 items-center gap-2">
                 <button
                   onClick={() => handleToggle(c)}
-                  title={c.enabled ? '禁用' : '启用'}
+                  title={c.enabled ? t.common.disabled : t.common.enabled}
                   className={`relative h-5 w-9 rounded-full transition ${c.enabled ? 'bg-green-500' : 'bg-gray-300 dark:bg-gray-600'}`}
                 >
                   <span className={`absolute top-0.5 h-4 w-4 rounded-full bg-white shadow transition-all ${c.enabled ? 'left-[18px]' : 'left-0.5'}`} />
                 </button>
                 <Button variant="ghost" onClick={() => handleTest(c)} disabled={test?.loading} title="发送测试消息">
-                  {test?.ok ? '重发测试' : '测试'}
+                  {test?.ok ? t.channels.retest : t.channels.test}
                 </Button>
-                <Button variant="ghost" onClick={() => openEdit(c)}>编辑</Button>
-                <Button variant="danger" onClick={() => handleDelete(c)}>删除</Button>
+                <Button variant="ghost" onClick={() => openEdit(c)}>{t.common.edit}</Button>
+                <Button variant="danger" onClick={() => handleDelete(c)}>{t.common.delete}</Button>
               </div>
             </Card>
           );
         })}
-        {channels.length === 0 && <p className="py-8 text-center text-gray-400 dark:text-gray-500">暂无渠道配置</p>}
+        {channels.length === 0 && <p className="py-8 text-center text-gray-400 dark:text-gray-500">{t.channels.empty}</p>}
       </div>
     </div>
   );
