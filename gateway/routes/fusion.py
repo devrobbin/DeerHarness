@@ -319,17 +319,22 @@ class FusionTeamSyncRequest(BaseModel):
 
 class FusionTeamRunRequest(BaseModel):
     task: str
-    agent_ids: Optional[list[str]] = None  # 指定团队成员；None = 全部 penguin Agent
-    template: Optional[str] = None  # 团队模板：预设主代理（orchestrator）人设
+    agent_ids: Optional[list[str]] = None  # 指定团队成员；None = 模板成员（无模板则全部）
+    template: Optional[str] = None  # 团队模板：预设主代理（orchestrator）人设 + 成员组成
+    workflow: Optional[str] = None  # 同团队工作流预设（任务为空时套用其任务模板）
 
 
 # ==================== 团队模板 ====================
-# 预设主代理人设 + 编排指引。soul 含 {team_members} 占位符——
-# 运行时会动态注入真实团队成员清单（评审遗留：不再硬编码成员名）。
+# 多团队编排：每套模板 = 专属主代理（orchestrator 人设）+ 成员组成 + 内置工作流。
+# - soul 含 {team_members} 占位符：运行时会动态注入真实团队成员清单（不再硬编码成员名）
+# - members：None = 全部 penguin Agent；否则为限定成员 id 列表（不同团队不同班底）
+# - workflows：同团队不同工作流预设（id/label/任务模板），前端选中后填入任务框可编辑
 TEAM_TEMPLATES: dict[str, dict] = {
     "crossborder-ops": {
         "name": "dh-orchestrator",
-        "description": "CrossBorder Ops 跨境运营总监（编排中心）",
+        "icon": "🌏",
+        "description": "跨境运营总监（全平台编排中心）：Amazon + TikTok Shop + 履约财税全局调度",
+        "members": None,  # None = 全部 Agent 入队
         "soul": """你是 CrossBorder Ops 跨境运营总监（编排中心），统筹跨境电商运营的各类任务。
 
 工作方式：
@@ -340,7 +345,203 @@ TEAM_TEMPLATES: dict[str, dict] = {
 当前团队成员（按需分派）：
 {team_members}
 
-风格：简洁、专业、结果导向。""",
+
+任务边界：若缺少真实业务数据，请基于行业典型值给出合理假设并在输出中明确标注假设，务必交付可执行的框架、模板与结论，不要仅停留在提问。
+
+风格：风格：简洁、专业、结果导向。""",
+        "workflows": [
+            {
+                "id": "daily-inspection",
+                "label": "日常运营巡检",
+                "task": "对当前店铺做一次日常运营巡检并输出今日待办清单：\n1. Amazon：listing 状态、Buy Box、广告账户余额与异常、库存告警、待处理客服（含 A-to-Z）\n2. TikTok Shop：在售商品卡规范、达人合作进度、内容发布计划执行情况\n3. 合规红线检查与物流在途异常\n输出：按优先级排序的待办清单 + 每项负责人建议。",
+            },
+            {
+                "id": "weekly-report",
+                "label": "平台运营周报",
+                "task": "生成上周平台运营周报：\n1. Amazon：销售额、ACoS/TACoS、Buy Box 赢得率、核心 ASIN 排名变化、库存周转\n2. TikTok Shop：GMV、GPM、内容曝光与转化、达人带货表现\n3. 竞品与价格动态、异常与风险\n输出：数据摘要 + 本周行动建议（含负责人）。",
+            },
+            {
+                "id": "campaign-plan",
+                "label": "大促活动策划",
+                "task": "策划一次平台大促活动（Prime Day / 黑五 / 双十一任选其一）：\n1. 选品：哪些 ASIN/SKU 作为主推，理由（BSR、库存、利润）\n2. 定价与 Coupon/Deal 节奏、广告预算分配（SP/SB/SD 或 Spark Ads）\n3. 内容侧：A+ 更新、短视频/直播脚本要点、达人安排\n4. 库存与物流保障、风险预案\n输出：可执行的活动方案（含时间线与负责人）。",
+            },
+        ],
+    },
+    "amazon-ops": {
+        "name": "dh-orchestrator-amazon",
+        "icon": "🛒",
+        "description": "Amazon 专项团队：Listing / 广告 / 定价竞品 / 库存 / 客服 / 合规 / 分析师",
+        "members": [
+            "pricing_compete",
+            "ad_optimizer",
+            "listing_seo",
+            "inventory_forecast",
+            "customer_reply",
+            "compliance_review",
+            "amazon_analyst",
+        ],
+        "soul": """你是 Amazon 专项运营指挥官，只负责 Amazon 站点（美国站优先）的精细化运营。
+
+工作方式：
+1. 把任务拆解为 Amazon 运营子任务（Listing / 广告 / 定价 / 库存 / 客服 / 合规）；
+2. 通过 task 工具分派给对应专项成员，可并行；
+3. 汇总为可直接执行的 Amazon 运营结论（含 ASIN、数据口径、责任人）。
+
+当前团队成员（按需分派）：
+{team_members}
+
+
+任务边界：若缺少真实业务数据，请基于行业典型值给出合理假设并在输出中明确标注假设，务必交付可执行的框架、模板与结论，不要仅停留在提问。
+
+风格：风格：数据说话、执行导向。""",
+        "workflows": [
+            {
+                "id": "listing-optimize",
+                "label": "Listing 优化",
+                "task": "优化一批核心 ASIN 的 Listing：\n1. 标题与五点描述：关键词覆盖（前端+Search Terms）、卖点结构化、合规用词\n2. 图片与 A+ 内容建议、类目节点与 BSR 位置\n3. 差评/Review 结构分析及应对\n输出：每个 ASIN 的优化清单（逐条可执行）。",
+            },
+            {
+                "id": "ad-review",
+                "label": "广告复盘与调优",
+                "task": "复盘最近广告投放并给出调优方案：\n1. 按 SP/SB/SD 分析 ACoS/TACoS、曝光-点击-转化漏斗\n2. 关键词：出单词 / 高花费无转化词 / 否定词建议\n3. 预算重分配建议（含理由）\n输出：广告优化表（结构 + 操作 + 预期效果）。",
+            },
+            {
+                "id": "restock-forecast",
+                "label": "补货与库存预测",
+                "task": "给出核心 SKU 的补货计划：\n1. 日均销量与趋势、季节性因子、当前可售库存与在途\n2. FBA 仓容/仓储费、断货风险与冗余风险测算\n3. 建议补货量、批次节奏与发货渠道\n输出：补货计划表。",
+            },
+            {
+                "id": "competitor-watch",
+                "label": "竞品与价格监控",
+                "task": "监控核心竞品并输出应对建议：\n1. 竞品价格/评分/Review 数量变化、Buy Box 归属\n2. 跟卖监控结果与警告\n3. 定价/优惠券应对建议（含毛利测算）\n输出：竞品动态表 + 应对动作。",
+            },
+        ],
+    },
+    "tiktok-shop": {
+        "name": "dh-orchestrator-tiktok",
+        "icon": "🎵",
+        "description": "TikTok Shop 专项团队：内容电商 / 达人生态 / 短视频广告 / 分析师",
+        "members": [
+            "product_sourcing",
+            "content_generator",
+            "ad_optimizer",
+            "tiktok_analyst",
+        ],
+        "soul": """你是 TikTok Shop 专项运营指挥官，专注美区 TikTok Shop 的内容电商打法。
+
+工作方式：
+1. 把任务拆解为 TikTok Shop 子任务（选品 / 内容脚本 / Spark Ads / 达人 / GPM 复盘）；
+2. 通过 task 工具分派给对应成员，可并行；
+3. 汇总为可直接执行的 TikTok Shop 运营结论（含视频选题、达人名单、预算口径）。
+
+当前团队成员（按需分派）：
+{team_members}
+
+
+任务边界：若缺少真实业务数据，请基于行业典型值给出合理假设并在输出中明确标注假设，务必交付可执行的框架、模板与结论，不要仅停留在提问。
+
+风格：风格：内容感强、节奏快、数据导向。""",
+        "workflows": [
+            {
+                "id": "content-week",
+                "label": "内容周计划",
+                "task": "制定未来一周的内容发布计划：\n1. 3-5 条短视频选题（挂钩在售商品与热点），含标题/钩子/脚本要点\n2. 与商品卡、Shop Tab、直播的联动安排\n3. 发布节奏与测试变量（素材 A/B）\n输出：内容日历表（日期/选题/形式/负责人）。",
+            },
+            {
+                "id": "creator-collab",
+                "label": "达人合作评估",
+                "task": "给出达人合作方案：\n1. 达人筛选标准（类目匹配、粉丝画像、带货 GPM 数据、内容质量）\n2. 拟定合作 Brief：产品卖点、创作方向、佣金/样品政策\n3. 合作流程与数据跟踪指标\n输出：达人合作清单 + Brief 模板。",
+            },
+            {
+                "id": "gpm-review",
+                "label": "直播与 GPM 复盘",
+                "task": "复盘最近 TikTok Shop 直播/短视频带货表现：\n1. GMV、GPM（千次观看成交）、转化漏斗（观看→点击→成交）\n2. 内容侧：哪类素材跑量、哪个话术/钩子有效\n3. Spark Ads 投放复盘与预算调整建议\n输出：复盘结论 + 下周优化动作。",
+            },
+        ],
+    },
+    "content-studio": {
+        "name": "dh-orchestrator-content",
+        "icon": "✍️",
+        "description": "内容工厂：商品文案 / A+ 页面 / 短视频脚本 / 品牌故事",
+        "members": [
+            "product_sourcing",
+            "content_generator",
+            "listing_seo",
+        ],
+        "soul": """你是内容工厂主编，统筹所有对外内容的产出与质检。
+
+工作方式：
+1. 把内容需求拆解为子任务（Listing 文案 / A+ 页面 / 短视频脚本 / 品牌故事）；
+2. 通过 task 工具分派给内容成员，可并行；
+3. 汇总为风格统一、平台合规、可直接交付的内容稿件。
+
+当前团队成员（按需分派）：
+{team_members}
+
+
+任务边界：若缺少真实业务数据，请基于行业典型值给出合理假设并在输出中明确标注假设，务必交付可执行的框架、模板与结论，不要仅停留在提问。
+
+风格：风格：专业、有转化力、合规。""",
+        "workflows": [
+            {
+                "id": "listing-copy",
+                "label": "商品页文案",
+                "task": "为指定商品产出完整商品页文案：\n1. 标题（前端关键词优先）+ 五点描述（卖点结构化）\n2. Search Terms 关键词组\n3. A+ 页面模块建议（图文结构）\n输出：可直接提交的文案稿。",
+            },
+            {
+                "id": "short-video",
+                "label": "短视频脚本",
+                "task": "为指定商品产出 3 条短视频脚本：\n1. 每条：前 3 秒钩子、口播文案、画面分镜、字幕要点\n2. 适配 TikTok Shop 与 Amazon 短视频位\n3. 附 CTA（挂车/店铺/搜索词）\n输出：脚本卡（可直接拍摄）。",
+            },
+            {
+                "id": "brand-story",
+                "label": "品牌故事",
+                "task": "撰写品牌故事与店铺形象文案：\n1. 品牌定位与差异化卖点\n2. 面向美区消费者的品牌故事（有情感共鸣）\n3. About Us / 店铺 banner 文案建议\n输出：完整文案稿。",
+            },
+        ],
+    },
+    "ops-support": {
+        "name": "dh-orchestrator-ops",
+        "icon": "📦",
+        "description": "履约与财税支持：物流 / 报关 / 退税 / 财税 / 合规",
+        "members": [
+            "logistics_monitor",
+            "customs_declare",
+            "tax_rebate",
+            "finance_tax",
+            "compliance_review",
+        ],
+        "soul": """你是跨境电商中后台支持主管，负责履约、关务、税务与合规事务。
+
+工作方式：
+1. 把任务拆解为物流/报关/退税/财税/合规子任务；
+2. 通过 task 工具分派给对应成员；
+3. 汇总为可执行的方案（含费用测算、时间线、所需资料清单）。
+
+当前团队成员（按需分派）：
+{team_members}
+
+
+任务边界：若缺少真实业务数据，请基于行业典型值给出合理假设并在输出中明确标注假设，务必交付可执行的框架、模板与结论，不要仅停留在提问。
+
+风格：风格：严谨、合规、可落地。""",
+        "workflows": [
+            {
+                "id": "logistics-plan",
+                "label": "物流方案",
+                "task": "为指定 SKU 制定物流方案：\n1. 渠道对比（快船/慢船/空运/海外仓）时效与成本\n2. 头程+尾程组合、补货批次与在途跟踪\n3. 风险预案（旺季延误、关税变动）\n输出：物流方案表（含费用测算）。",
+            },
+            {
+                "id": "customs-plan",
+                "label": "关税与合规",
+                "task": "核查一批商品的进口合规与关税：\n1. HS 编码归类与关税税率、附加税（如 301 关税）\n2. 禁限售与认证要求（CPC/UL/EPA 等）\n3. 清关资料清单与风险提示\n输出：合规核查表。",
+            },
+            {
+                "id": "tax-rebate",
+                "label": "退税核算",
+                "task": "核算近期出口退税：\n1. 适用退税率与征退差计算\n2. 单证要求（报关单/发票/结汇）与流程节点\n3. 风险点（逾期申报、单证不符）\n输出：退税核算表 + 操作指引。",
+            },
+        ],
     },
 }
 
@@ -527,15 +728,32 @@ async def _sync_orchestrator(template: str, team_members: list[dict]) -> str:
     return name
 
 
-@router.post("/team/templates")
+@router.get("/team/templates")
 async def fusion_team_templates():
-    """列出可用团队模板。"""
+    """列出可用团队模板：主代理、成员组成（None=全部）与内置工作流。"""
     return {
         "templates": [
-            {"name": key, "description": spec["description"]}
+            {
+                "name": key,
+                "icon": spec.get("icon", "🧭"),
+                "description": spec["description"],
+                "members": spec.get("members"),  # None = 全部 Agent
+                "workflows": spec.get("workflows", []),
+            }
             for key, spec in TEAM_TEMPLATES.items()
         ]
     }
+
+
+def _resolve_workflow_task(template: str | None, workflow_id: str | None, task: str) -> str:
+    """工作流解析：任务为空时套用模板内置工作流的预设任务（用户可改后覆盖）。"""
+    if not template or not workflow_id or task.strip():
+        return task
+    spec = TEAM_TEMPLATES.get(template) or {}
+    for wf in spec.get("workflows", []):
+        if wf["id"] == workflow_id:
+            return wf["task"]
+    return task
 
 
 class FusionEvaluateRequest(BaseModel):
@@ -747,14 +965,31 @@ async def fusion_team_run(req: FusionTeamRunRequest):
     """团队编排：主代理（DeerFlow）按需把子任务分派给团队成员（penguin Agent）。
 
     - 自动同步团队配置并重启使生效（首次调用）
-    - 指定 template 时以模板主代理（如跨境运营总监）身份编排
+    - 指定 template 时：
+      * 以该团队的主代理身份编排（不同团队 = 不同编排人设）
+      * 成员自动限定为该团队的班底（不同团队 = 不同成员组成）
+    - 指定 workflow 时：任务为空则套用同团队的内置工作流预设
     - 返回最终回复 + 编排过程（task 分派记录）
     """
     team = await _read_penguin_agent_defs()
+
+    # 模板成员限定：不同团队 = 不同班底（先按模板过滤，再按 agent_ids 收窄）
+    if req.template:
+        spec = TEAM_TEMPLATES.get(req.template) or {}
+        allowed = spec.get("members")
+        if allowed is not None:
+            team = [m for m in team if m["agent_id"] in allowed]
+        if not team:
+            raise HTTPException(status_code=404, detail=f"团队模板 {req.template} 无可用成员")
+
     if req.agent_ids:
         team = [m for m in team if m["agent_id"] in req.agent_ids]
     if not team:
         raise HTTPException(status_code=404, detail="团队为空：请先在 penguin 创建 Agent")
+
+    task = _resolve_workflow_task(req.template, req.workflow, req.task)
+    if not task.strip():
+        raise HTTPException(status_code=400, detail="任务内容为空")
 
     synced, changed = _write_subagents_config(team)
     if changed:
@@ -770,7 +1005,7 @@ async def fusion_team_run(req: FusionTeamRunRequest):
     try:
         await _proxy_df("POST", "/api/threads", json={"thread_id": thread_id})
         run_body: dict = {
-            "input": {"messages": [{"role": "user", "content": req.task}]},
+            "input": {"messages": [{"role": "user", "content": task}], "workflow_id": req.workflow or ""},
             "config": {"recursion_limit": 2000},
             "context": {
                 "model_name": DEFAULT_MODEL,
@@ -794,7 +1029,7 @@ async def fusion_team_run(req: FusionTeamRunRequest):
 
         if status in ("failed", "error", "cancelled"):
             # 失败不再伪装成功（评审 B）
-            record_trace("dh-team", status, task_goal=req.task[:200], thread_id=thread_id)
+            record_trace("dh-team", status, task_goal=task[:200], thread_id=thread_id)
             raise HTTPException(
                 status_code=502,
                 detail=f"团队任务以 {status} 结束，请稍后重试或查看 DeerFlow 线程 {thread_id}",
@@ -807,7 +1042,7 @@ async def fusion_team_run(req: FusionTeamRunRequest):
         record_trace(
             "dh-team",
             "success",
-            task_goal=req.task[:200],
+            task_goal=task[:200],
             thread_id=thread_id,
             delegations=len(delegation),
             delegations_failed=sum(
@@ -841,17 +1076,21 @@ def _extract_delegations(state: dict) -> list[dict]:
 
 
 def _extract_ai_reply(state: dict) -> str:
-    """从线程状态中提取最后一条非空 AI 消息内容。"""
+    """从线程状态中提取最后一条非空 AI 消息内容。
+
+    若主代理以澄清/追问收尾（如 ask_clarification 工具），
+    把澄清问题作为回复呈现，而不是伪装"未返回内容"。
+    """
     messages = (state.get("values") or {}).get("messages") or []
     for m in reversed(messages):
         role = m.get("type") or m.get("role")
-        if role != "ai":
-            continue
         content = m.get("content", "")
         if isinstance(content, list):
             content = "".join(
                 str(x.get("text", "")) for x in content if isinstance(x, dict)
             )
-        if content.strip():
+        if role == "ai" and content.strip():
             return content
+        if role == "tool" and m.get("name") == "ask_clarification" and content.strip():
+            return f"❓ 主代理需要更多信息：\n\n{content}"
     return "（DeerFlow 未返回内容）"
