@@ -106,6 +106,24 @@ _BUILTIN_BENCHMARKS: dict[str, list[dict]] = {
                 "其中 tools 是字符串数组（至少 2 项）。只输出 JSON，不要额外文字。"
             ),
         },
+        {
+            "id": "AMZ-001-listing",
+            "title": "Amazon Listing 五点描述",
+            "statement": (
+                "为「便携式电动奶泡器（USB 充电，304 不锈钢）」写 Amazon Listing 的"
+                "五点描述（Bullet Points），共 5 条，每条不超过 200 字符，"
+                "突出卖点与使用场景，英文输出。"
+            ),
+        },
+        {
+            "id": "TT-001-sourcing",
+            "title": "TikTok Shop 选品标准",
+            "statement": (
+                "给出 TikTok Shop 美区选品的 5 条核心标准（含内容适配度维度），"
+                "并基于标准判断：便携奶泡器是否适合作为 TikTok Shop 爆品？"
+                "用 Markdown 输出，结论明确。"
+            ),
+        },
     ],
 }
 
