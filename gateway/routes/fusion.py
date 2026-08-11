@@ -1262,12 +1262,65 @@ async def fusion_team_status(thread_id: str):
         if is_terminal:
             result["reply"] = _extract_ai_reply(state)
             result["delegations"] = _extract_delegations(state)
-            _TEAM_RUNS.pop(thread_id, None)  # 结束后清理注册
         return result
     except HTTPException:
         raise
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"团队进度查询失败: {exc}")
+
+
+def _extract_delegation_details(state: dict, team: list[dict]) -> dict:
+    """按成员聚合本次会话的分派详情（分派任务 prompt + 执行结果）。
+
+    供前端成员抽屉展示："点击成员 → 右侧推拉窗查看该成员会话内容"。
+    """
+    messages = (state.get("values") or {}).get("messages") or []
+    started: dict[str, dict] = {}   # tool_call_id → {member, prompt}
+    results: dict[str, dict] = {}   # tool_call_id → {result, status}
+    for m in messages:
+        role = m.get("type") or m.get("role")
+        if role == "ai":
+            for tc in m.get("tool_calls") or []:
+                if tc.get("name") == "task":
+                    args = tc.get("args") or {}
+                    prompt = f"{args.get('description', '')}\n{args.get('prompt', '')}".strip()
+                    started[tc.get("id")] = {
+                        "member": _attribute_member(prompt, team),
+                        "prompt": prompt[:3000],
+                    }
+        elif role == "tool" and m.get("name") == "task":
+            tcid = m.get("tool_call_id")
+            sub_status = (m.get("additional_kwargs") or {}).get("subagent_status") or m.get("status")
+            results[tcid] = {
+                "result": str(m.get("content", "") or "")[:6000],
+                "status": "failed" if sub_status in ("failed", "error") else "completed",
+            }
+
+    members: dict[str, list[dict]] = {}
+    other: list[dict] = []
+    for tcid, s in started.items():
+        item = {"prompt": s["prompt"], **(results.get(tcid) or {"result": "", "status": "running"})}
+        if s["member"]:
+            members.setdefault(s["member"], []).append(item)
+        else:
+            other.append(item)
+    return {"members": members, "other": other}
+
+
+@router.get("/team/delegations/{thread_id}")
+async def fusion_team_delegations(thread_id: str):
+    """成员分派详情：按成员聚合本次会话的任务（prompt）与结果（result）。"""
+    thread_id = valid_id(thread_id, "thread_id")
+    try:
+        run_info = _TEAM_RUNS.get(thread_id) or {}
+        team = run_info.get("team") or []
+        state = await _proxy_df("GET", f"/api/threads/{thread_id}/state")
+        details = _extract_delegation_details(state, team)
+        return {"thread_id": thread_id, "members": details["members"], "other": details["other"]}
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"分派详情查询失败: {exc}")
 
 
 def _extract_delegations(state: dict) -> list[dict]:

@@ -166,3 +166,38 @@ class TestTeamProgress:
         out = _parse_team_progress(state, self.TEAM)
         by_id = {m["agent_id"]: m["state"] for m in out["members"]}
         assert by_id["inventory_forecast"] == "failed"
+
+
+class TestDelegationDetails:
+    """成员分派详情聚合（抽屉数据源）。"""
+
+    TEAM = [{"agent_id": "ad_optimizer", "name": "广告优化Agent", "system_prompt": "x"}]
+
+    def test_aggregate_by_member(self):
+        from routes.fusion import _extract_delegation_details
+        state = {"values": {"messages": [
+            {"type": "ai", "tool_calls": [{"id": "c1", "name": "task",
+                                           "args": {"description": "广告复盘", "prompt": "你是广告优化专家"}}]},
+            {"type": "tool", "name": "task", "tool_call_id": "c1",
+             "content": "Task Succeeded. Result: ACoS 35%",
+             "additional_kwargs": {"subagent_status": "completed"}},
+        ]}}
+        out = _extract_delegation_details(state, self.TEAM)
+        tasks = out["members"]["ad_optimizer"]
+        assert len(tasks) == 1
+        assert "广告复盘" in tasks[0]["prompt"]
+        assert "ACoS 35%" in tasks[0]["result"]
+        assert tasks[0]["status"] == "completed"
+        assert out["other"] == []
+
+    def test_running_task_no_result(self):
+        from routes.fusion import _extract_delegation_details
+        # 分派中：只有 AI tool_call，无 tool 结果 → status=running
+        state = {"values": {"messages": [
+            {"type": "ai", "tool_calls": [{"id": "c1", "name": "task",
+                                           "args": {"prompt": "广告优化"}}]},
+        ]}}
+        out = _extract_delegation_details(state, self.TEAM)
+        task = out["members"]["ad_optimizer"][0]
+        assert task["status"] == "running"
+        assert task["result"] == ""

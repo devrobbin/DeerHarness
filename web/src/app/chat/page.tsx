@@ -97,6 +97,32 @@ export default function ChatPage() {
   const [teamMembers, setTeamMembers] = useState<AgentItem[]>([]);
   const pollRef = useRef<number | null>(null);
 
+  // 成员抽屉：点击成员徽章 → 右侧推拉窗展示该成员会话内容
+  const [drawerMember, setDrawerMember] = useState<AgentItem | null>(null);
+  const [teamThreadId, setTeamThreadId] = useState('');
+  const [delegationsByMember, setDelegationsByMember] = useState<
+    Record<string, { prompt: string; result: string; status: string }[]>
+  >({});
+  const [otherDelegations, setOtherDelegations] = useState<
+    { prompt: string; result: string; status: string }[]
+  >([]);
+
+  /** 拉取分派详情（成员抽屉数据源） */
+  const loadDelegations = async (threadId: string) => {
+    try {
+      const d = await apiGet<{ members: Record<string, { prompt: string; result: string; status: string }[]>; other: { prompt: string; result: string; status: string }[] }>(
+        `/api/fusion/team/delegations/${threadId}`,
+      );
+      setDelegationsByMember(d.members);
+      setOtherDelegations(d.other ?? []);
+    } catch { /* 详情拉取失败不阻塞展示 */ }
+  };
+
+  const openMemberDrawer = (m: AgentItem) => {
+    setDrawerMember(m);
+    if (teamThreadId && !delegationsByMember[m.agentId]) loadDelegations(teamThreadId);
+  };
+
   const stopPolling = () => {
     if (pollRef.current !== null) {
       window.clearTimeout(pollRef.current);
@@ -228,6 +254,9 @@ export default function ChatPage() {
       template: template || undefined,
       workflow: workflow || undefined,
     });
+    setTeamThreadId(start.thread_id);
+    setDelegationsByMember({});
+    setOtherDelegations([]);
 
     let attempts = 0;
     const MAX_ATTEMPTS = 100; // 100 × 3s ≈ 5 分钟
@@ -245,6 +274,8 @@ export default function ChatPage() {
         if (d.members.length > 0) {
           setTeamStatus(prev => ({ ...prev, ...Object.fromEntries(d.members.map(m => [m.agent_id, m])) }));
         }
+        // 抽屉打开时同步刷新成员分派详情（进行中任务实时变为已完成+结果）
+        if (drawerMember) loadDelegations(start.thread_id);
         if (!d.terminal) {
           pollRef.current = window.setTimeout(poll, 3000);
           return;
@@ -252,6 +283,7 @@ export default function ChatPage() {
         setLoading(false);
         const reply = d.reply || '（团队任务已结束，未返回汇总内容）';
         setMessages(prev => [...prev.slice(0, -1), { role: 'assistant', content: reply, delegations: d.delegations ?? [] }]);
+        loadDelegations(start.thread_id); // 预拉成员分派详情（抽屉数据）
       } catch (err) {
         setLoading(false);
         setMessages(prev => prev.slice(0, -1));
@@ -471,7 +503,7 @@ export default function ChatPage() {
         {error && <p role="alert" className="text-center text-sm text-red-500">{error}</p>}
       </div>
 
-      {/* 团队模式：已启用成员实时工作状态（工作中转圈） */}
+      {/* 团队模式：已启用成员实时工作状态（工作中转圈；点击成员查看其会话内容） */}
       {mode === 'team' && teamMembers.length > 0 && (
         <div className="mt-2 mb-1 flex flex-wrap items-center gap-1.5 text-xs">
           <span className="text-gray-400 dark:text-gray-500">👥 已启用成员（{teamMembers.length}）</span>
@@ -486,7 +518,12 @@ export default function ChatPage() {
                     ? 'bg-red-50 text-red-500 dark:bg-red-900/30 dark:text-red-400'
                     : 'bg-gray-100 text-gray-500 dark:bg-gray-700 dark:text-gray-400';
             return (
-              <span key={m.agentId} className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 ${badge}`}>
+              <button
+                key={m.agentId}
+                onClick={() => openMemberDrawer(m)}
+                title="点击查看该成员会话内容"
+                className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 transition hover:ring-2 hover:ring-blue-300 dark:hover:ring-blue-600 ${badge}`}
+              >
                 {st === 'working' ? (
                   <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-purple-500 border-t-transparent" />
                 ) : st === 'done' ? (
@@ -497,7 +534,7 @@ export default function ChatPage() {
                   '⏳'
                 )}
                 {m.name}
-              </span>
+              </button>
             );
           })}
         </div>
@@ -522,6 +559,80 @@ export default function ChatPage() {
           {loading ? LOADING_TEXT[mode] : '发送'}
         </Button>
       </div>
+
+      {/* 成员会话抽屉：点击成员徽章右侧滑出，展示该成员本次会话内容 */}
+      {drawerMember && (
+        <div className="fixed inset-0 z-40 flex justify-end">
+          <div className="absolute inset-0 bg-black/30" onClick={() => setDrawerMember(null)} />
+          <div
+            className="relative z-10 flex h-full w-[26rem] max-w-[92vw] flex-col bg-white shadow-2xl dark:bg-gray-800"
+            style={{ animation: 'drawer-in 0.22s ease' }}
+          >
+            <div className="flex items-center justify-between border-b border-gray-200 p-4 dark:border-gray-700">
+              <div>
+                <p className="font-semibold text-gray-800 dark:text-gray-100">{drawerMember.name}</p>
+                <p className="font-mono text-xs text-gray-400">{drawerMember.agentId}</p>
+              </div>
+              <button
+                onClick={() => setDrawerMember(null)}
+                aria-label="关闭"
+                className="rounded px-2 py-1 text-lg text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-700"
+              >
+                ✕
+              </button>
+            </div>
+
+            <div className="flex-1 space-y-4 overflow-y-auto p-4">
+              {(() => {
+                const tasks = delegationsByMember[drawerMember.agentId] ?? [];
+                if (tasks.length === 0) {
+                  return (
+                    <p className="py-10 text-center text-sm text-gray-400">
+                      本次会话中该成员未被分派任务
+                    </p>
+                  );
+                }
+                return tasks.map((task, i) => (
+                  <div key={i} className="space-y-2">
+                    <div className="flex items-center justify-between">
+                      <p className="text-xs font-medium text-gray-500 dark:text-gray-400">
+                        📨 分派任务 #{i + 1}
+                      </p>
+                      {task.status === 'completed' && <span className="text-xs text-green-600 dark:text-green-400">✅ 已完成</span>}
+                      {task.status === 'failed' && <span className="text-xs text-red-500">❌ 失败</span>}
+                      {task.status === 'running' && <span className="text-xs text-purple-500">🔄 进行中</span>}
+                    </div>
+                    <pre className="max-h-48 overflow-y-auto whitespace-pre-wrap rounded border border-gray-200 bg-gray-50 p-2 font-mono text-[11px] text-gray-600 dark:border-gray-600 dark:bg-gray-900 dark:text-gray-300">
+                      {task.prompt}
+                    </pre>
+                    {task.result && (
+                      <>
+                        <p className="text-xs font-medium text-gray-500 dark:text-gray-400">📄 执行结果</p>
+                        <div className="max-h-96 overflow-y-auto rounded border border-gray-200 p-2 text-xs dark:border-gray-600">
+                          <Markdown content={task.result} />
+                        </div>
+                      </>
+                    )}
+                  </div>
+                ));
+              })()}
+
+              {otherDelegations.length > 0 && (
+                <div className="rounded border border-dashed border-gray-300 p-3 dark:border-gray-600">
+                  <p className="mb-2 text-xs font-medium text-gray-500 dark:text-gray-400">
+                    ⚙️ 其他分派（无法归属成员）{otherDelegations.length} 次
+                  </p>
+                  {otherDelegations.slice(0, 5).map((t, i) => (
+                    <p key={i} className="mb-1 line-clamp-2 text-[11px] text-gray-400">
+                      {t.prompt.slice(0, 120)}
+                    </p>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
