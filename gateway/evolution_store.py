@@ -54,6 +54,11 @@ CREATE TABLE IF NOT EXISTS evolution_approvals (
     status TEXT DEFAULT 'pending',      -- pending / approved / rejected
     created_at REAL
 );
+CREATE TABLE IF NOT EXISTS team_runs (
+    thread_id TEXT PRIMARY KEY,
+    team_json TEXT NOT NULL,
+    started_at REAL
+);
 CREATE TABLE IF NOT EXISTS config_overrides (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     team_id TEXT NOT NULL,
@@ -336,3 +341,44 @@ def list_overrides() -> list[dict]:
         return [dict(r) for r in rows]
     finally:
         conn.close()
+
+
+# ==================== 团队 run 成员清单持久化（评审 P2-2：重启后 status 恢复） ====================
+
+
+def save_team_run(thread_id: str, team: list[dict]) -> None:
+    with _lock:
+        conn = _connect()
+        try:
+            conn.execute(
+                "INSERT INTO team_runs (thread_id, team_json, started_at) VALUES (?,?,?)"
+                " ON CONFLICT(thread_id) DO UPDATE SET team_json=excluded.team_json, started_at=excluded.started_at",
+                (thread_id, json.dumps(team, ensure_ascii=False), time.time()),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+
+def load_team_run(thread_id: str) -> list[dict] | None:
+    conn = _connect()
+    try:
+        row = conn.execute("SELECT team_json FROM team_runs WHERE thread_id=?", (thread_id,)).fetchone()
+        if not row:
+            return None
+        try:
+            return json.loads(row["team_json"])
+        except (json.JSONDecodeError, TypeError):
+            return []
+    finally:
+        conn.close()
+
+
+def delete_team_run(thread_id: str) -> None:
+    with _lock:
+        conn = _connect()
+        try:
+            conn.execute("DELETE FROM team_runs WHERE thread_id=?", (thread_id,))
+            conn.commit()
+        finally:
+            conn.close()

@@ -57,6 +57,30 @@ export function AgentSettings({ agent, onClose, onSaved }: AgentSettingsProps) {
   const [error, setError] = useState('');
   const [saved, setSaved] = useState(false);
   const promptRef = useRef<HTMLTextAreaElement>(null);
+  const drawerRef = useRef<HTMLDivElement>(null);
+
+  // 抽屉 a11y（评审 P2）：Esc 关闭 + aria-modal + 焦点 trap + 滚动锁
+  useEffect(() => {
+    const prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
+    const onFocus = (e: FocusEvent) => {
+      const panel = drawerRef.current;
+      if (panel && !panel.contains(e.target as Node)) {
+        (panel.querySelector('button[aria-label="关闭"]') as HTMLElement | null)?.focus();
+      }
+    };
+    document.addEventListener('keydown', onKey);
+    document.addEventListener('focusin', onFocus);
+    requestAnimationFrame(() => {
+      (drawerRef.current?.querySelector('button[aria-label="关闭"]') as HTMLElement | null)?.focus();
+    });
+    return () => {
+      document.body.style.overflow = prevOverflow;
+      document.removeEventListener('keydown', onKey);
+      document.removeEventListener('focusin', onFocus);
+    };
+  }, [onClose]);
 
   useEffect(() => {
     apiGet<{ config: AgentConfig }>(`/api/agents/${encodeURIComponent(agentId)}/config`)
@@ -115,9 +139,10 @@ export function AgentSettings({ agent, onClose, onSaved }: AgentSettingsProps) {
   const label = 'mb-1 block text-xs font-medium text-gray-500 dark:text-gray-400';
 
   return (
-    <div className="fixed inset-0 z-40 flex justify-end">
+    <div className="fixed inset-0 z-40 flex justify-end" role="dialog" aria-modal="true" aria-label={`Agent 设置 · ${agent.name}`}>
       <div className="absolute inset-0 bg-black/30" onClick={onClose} />
       <div
+        ref={drawerRef}
         className="relative z-10 flex h-full w-[34rem] max-w-[94vw] flex-col bg-white shadow-2xl dark:bg-gray-800"
         style={{ animation: 'drawer-in 0.22s ease' }}
       >

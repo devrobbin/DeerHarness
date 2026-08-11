@@ -463,3 +463,18 @@ class TestEvolutionEngine:
 def asyncio_run(coro):
     import asyncio
     return asyncio.run(coro)
+
+
+class TestTeamRunPersistence:
+    """团队 run 成员清单持久化（评审 P2-2：重启后 status 恢复归因）。"""
+
+    def test_save_load_delete(self, tmp_path, monkeypatch):
+        import evolution_store as es
+        monkeypatch.setattr(es, "DB_FILE", str(tmp_path / "evo.db"))
+        monkeypatch.setattr(es, "_initialized", False)
+        es.init_db()
+        team = [{"agent_id": "ad_optimizer", "name": "广告优化", "system_prompt": "x"}]
+        es.save_team_run("dh-team-x", team)
+        assert es.load_team_run("dh-team-x") == team
+        es.delete_team_run("dh-team-x")
+        assert es.load_team_run("dh-team-x") is None

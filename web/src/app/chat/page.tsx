@@ -132,6 +132,19 @@ export default function ChatPage() {
   };
   useEffect(() => stopPolling, []);
 
+  // 成员抽屉 Esc 关闭 + 滚动锁（评审 P2 a11y）
+  useEffect(() => {
+    if (!drawerMember) return;
+    const prevOverflow = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setDrawerMember(null); };
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.body.style.overflow = prevOverflow;
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [drawerMember]);
+
   // 新消息自动滚到底部
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' });
@@ -570,7 +583,7 @@ export default function ChatPage() {
 
       {/* 成员会话抽屉：点击成员徽章右侧滑出，展示该成员本次会话内容 */}
       {drawerMember && (
-        <div className="fixed inset-0 z-40 flex justify-end">
+        <div className="fixed inset-0 z-40 flex justify-end" role="dialog" aria-modal="true" aria-label={`${drawerMember.name} 会话内容`}>
           <div className="absolute inset-0 bg-black/30" onClick={() => setDrawerMember(null)} />
           <div
             className="relative z-10 flex h-full w-[26rem] max-w-[92vw] flex-col bg-white shadow-2xl dark:bg-gray-800"

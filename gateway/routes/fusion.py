@@ -1019,12 +1019,23 @@ _TEAM_RUN_TTL = 1800.0  # 30 分钟过期清理
 
 
 def _register_team_run(thread_id: str, team: list[dict]) -> None:
-    """登记进行中的团队 run（含成员清单），同时清理过期条目。"""
+    """登记进行中的团队 run（内存 + SQLite 双写，重启后 status 仍可恢复归因）。"""
     now = time.monotonic()
     stale = [k for k, v in _TEAM_RUNS.items() if now - v["started_at"] > _TEAM_RUN_TTL]
     for k in stale:
         _TEAM_RUNS.pop(k, None)
+        evolution_store.delete_team_run(k)
     _TEAM_RUNS[thread_id] = {"team": team, "started_at": now}
+    evolution_store.save_team_run(thread_id, team)
+
+
+def _load_team_run(thread_id: str) -> list[dict]:
+    """读取成员清单：优先内存（最新），回退 SQLite（重启后恢复）。"""
+    run_info = _TEAM_RUNS.get(thread_id) or {}
+    team = run_info.get("team")
+    if team is None:
+        team = evolution_store.load_team_run(thread_id) or []
+    return team
 
 
 def _apply_member_overrides(team: list[dict], template: str) -> None:
@@ -1314,9 +1325,8 @@ async def fusion_team_status(thread_id: str):
         status = run.get("status", "unknown")
         run_id = run.get("run_id")
 
-        # 成员清单：来自 /team/start 时的注册表（fallback 空团队 = 仅返回分派统计）
-        run_info = _TEAM_RUNS.get(thread_id) or {}
-        team = run_info.get("team") or []
+        # 成员清单：内存注册表优先，回退 SQLite 持久化（重启后仍能归因）
+        team = _load_team_run(thread_id)
 
         state = await _proxy_df("GET", f"/api/threads/{thread_id}/state")
         progress = _parse_team_progress(state, team)
@@ -1383,8 +1393,7 @@ async def fusion_team_delegations(thread_id: str):
     """成员分派详情：按成员聚合本次会话的任务（prompt）与结果（result）。"""
     thread_id = valid_id(thread_id, "thread_id")
     try:
-        run_info = _TEAM_RUNS.get(thread_id) or {}
-        team = run_info.get("team") or []
+        team = _load_team_run(thread_id)
         state = await _proxy_df("GET", f"/api/threads/{thread_id}/state")
         details = _extract_delegation_details(state, team)
         return {"thread_id": thread_id, "members": details["members"], "other": details["other"]}
