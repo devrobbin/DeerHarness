@@ -25,6 +25,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 import config
+import agent_prefs
 from penguin_client import PenguinClient
 from validate import valid_id
 
@@ -102,6 +103,44 @@ async def create_agent(req: AgentCreateRequest):
     return {"agent": result.get("agent"), "project_id": project_id}
 
 
+# ==================== 项目模型与技能库（静态路由须在 /{agent_id} 前） ====================
+
+
+@router.get("/models")
+async def list_project_models():
+    """项目可用模型列表（代理 penguin /api/projects/:p/models，含 default 标记）。"""
+    data = await _proxy("GET", "/api/projects")
+    projects = data.get("projects", [])
+    out: list[dict] = []
+    seen: set[tuple[str, str]] = set()
+    for project in projects:
+        pid = project["projectId"]
+        models = (await _proxy("GET", f"/api/projects/{pid}/models")).get("models", [])
+        for m in models:
+            key = (m.get("provider", ""), m.get("modelId", ""))
+            if key in seen or not all(key):
+                continue
+            seen.add(key)
+            out.append({
+                "provider": key[0],
+                "model_id": key[1],
+                "display_name": m.get("displayName") or key[1],
+                "is_default": bool(m.get("isDefault")),
+                "project_id": pid,
+            })
+    return {"models": out}
+
+
+# ==================== 技能库（per-agent skills） ====================
+
+
+@router.get("/skills-library")
+async def list_skills_library():
+    """技能库（代理 penguin GET /api/skills，分组列表）。"""
+    return await _proxy("GET", "/api/skills")
+
+
+
 @router.get("/{agent_id}")
 async def get_agent(agent_id: str):
     """获取 Agent 详情（跨项目查找）。"""
@@ -133,6 +172,8 @@ class AgentConfigUpdate(BaseModel):
     system_prompt: Optional[str] = None
     max_turns: Optional[int] = None
     model: Optional[AgentModelConfig] = None
+    tools_builtin: Optional[list[dict]] = None  # 整表替换（penguin toolsBuiltin 契约）
+    mcp_servers: Optional[list[dict]] = None    # 整表替换（penguin mcpServers 契约）
 
 
 def _to_penguin_model(model: AgentModelConfig) -> dict:
@@ -170,12 +211,106 @@ async def update_agent_config(agent_id: str, req: AgentConfigUpdate):
         body["maxTurns"] = req.max_turns
     if req.model is not None:
         body["model"] = _to_penguin_model(req.model)
+    if req.tools_builtin is not None:
+        body["toolsBuiltin"] = req.tools_builtin
+    if req.mcp_servers is not None:
+        body["mcpServers"] = req.mcp_servers
     view = await _proxy(
         "PUT",
         f"/api/projects/{project_id}/agents/{agent_id}/config",
         json={"config": body},
     )
     return {"success": True, "agent_id": agent_id, "config": view.get("config", {})}
+
+
+# ==================== 模型偏好（每 Agent 默认模型） ====================
+
+
+class ModelPrefRequest(BaseModel):
+    provider: Optional[str] = None
+    model_id: Optional[str] = None
+
+
+@router.get("/{agent_id}/model-pref")
+async def get_agent_model_pref(agent_id: str):
+    """每 Agent 默认模型偏好（DeerHarness 偏好层；penguin 原生为项目级）。"""
+    agent_id = valid_id(agent_id, "agent_id")
+    return {"agent_id": agent_id, "pref": agent_prefs.get_model_pref(agent_id)}
+
+
+@router.put("/{agent_id}/model-pref")
+async def set_agent_model_pref(agent_id: str, req: ModelPrefRequest):
+    """设置/清除默认模型偏好（provider+model_id 都空 = 回落项目默认）。"""
+    agent_id = valid_id(agent_id, "agent_id")
+    await _find_agent_project(agent_id)  # 校验 agent 存在
+    pref = agent_prefs.set_model_pref(agent_id, req.provider, req.model_id)
+    return {"success": True, "agent_id": agent_id, "pref": pref}
+
+
+@router.get("/{agent_id}/skills")
+async def list_agent_skills(agent_id: str):
+    """Agent 已安装技能。"""
+    project_id = await _find_agent_project(agent_id)
+    return await _proxy("GET", f"/api/projects/{project_id}/agents/{agent_id}/skills")
+
+
+class SkillInstallRequest(BaseModel):
+    names: list[str]
+
+
+@router.post("/{agent_id}/skills")
+async def install_agent_skills(agent_id: str, req: SkillInstallRequest):
+    """安装技能（all-or-nothing）。"""
+    project_id = await _find_agent_project(agent_id)
+    return await _proxy(
+        "POST",
+        f"/api/projects/{project_id}/agents/{agent_id}/skills",
+        json={"names": req.names},
+    )
+
+
+@router.delete("/{agent_id}/skills/{skill_name}")
+async def uninstall_agent_skill(agent_id: str, skill_name: str):
+    """卸载技能（penguin 返回 204 空 body，不能走 _proxy 的 JSON 解析）。"""
+    project_id = await _find_agent_project(agent_id)
+    skill_name = valid_id(skill_name, "skill_name")
+    resp = await penguin.request(
+        "DELETE", f"/api/projects/{project_id}/agents/{agent_id}/skills/{skill_name}"
+    )
+    if resp.status_code >= 400:
+        raise HTTPException(status_code=resp.status_code, detail=resp.text)
+    return {"success": True}
+
+
+# ==================== Vault（环境变量） ====================
+
+
+class VaultEntry(BaseModel):
+    key: str
+    value: Optional[str] = None  # None = 保留现有值
+
+
+class VaultUpdateRequest(BaseModel):
+    entries: list[VaultEntry]
+
+
+@router.get("/{agent_id}/vault")
+async def get_agent_vault(agent_id: str):
+    """Agent Vault（环境变量，值已掩码）。"""
+    project_id = await _find_agent_project(agent_id)
+    return await _proxy("GET", f"/api/projects/{project_id}/agents/{agent_id}/vault")
+
+
+@router.put("/{agent_id}/vault")
+async def update_agent_vault(agent_id: str, req: VaultUpdateRequest):
+    """整表替换 Vault（与 penguin 契约一致）。"""
+    project_id = await _find_agent_project(agent_id)
+    entries = [{"key": e.key, "value": e.value} if e.value is not None else {"key": e.key} for e in req.entries]
+    return await _proxy(
+        "PUT",
+        f"/api/projects/{project_id}/agents/{agent_id}/vault",
+        json={"entries": entries},
+    )
 
 
 @router.delete("/{agent_id}")
@@ -200,14 +335,21 @@ async def chat_with_agent(agent_id: str, req: AgentChatRequest):
     回复判定：轮询消息流直到出现比发送前更新的 ``model_msg`` 且文本非空。
     """
     agent_id = valid_id(agent_id, "agent_id")
-    project_id = valid_id(req.project_id or DEFAULT_PROJECT, "project_id")
+    # 解析 agent 真实所属项目（修复：跨项目 agent 无法聊天的历史 bug）
+    project_id = valid_id(req.project_id or await _find_agent_project(agent_id), "project_id")
     session_id = valid_id(req.session_id, "session_id") if req.session_id else None
     try:
-        # 1. 会话：复用或新建
+        # 1. 会话：复用或新建（新建时携带每 Agent 模型偏好 → penguin 会话级选择）
         session_id = req.session_id
         if not session_id:
+            session_body: dict = {}
+            pref = agent_prefs.get_model_pref(agent_id)
+            if pref and pref.get("provider") and pref.get("model_id"):
+                session_body["provider"] = pref["provider"]
+                session_body["modelId"] = pref["model_id"]
             created = await _proxy(
-                "POST", f"/api/projects/{project_id}/agents/{agent_id}/sessions", json={}
+                "POST", f"/api/projects/{project_id}/agents/{agent_id}/sessions",
+                json=session_body,
             )
             session_id = created["session"]["sessionId"]
 

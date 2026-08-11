@@ -201,3 +201,50 @@ class TestDelegationDetails:
         task = out["members"]["ad_optimizer"][0]
         assert task["status"] == "running"
         assert task["result"] == ""
+
+
+class TestModelPref:
+    """每 Agent 模型偏好层。"""
+
+    def test_set_and_get(self, tmp_path, monkeypatch):
+        import agent_prefs
+        monkeypatch.setattr(agent_prefs, "PREF_FILE", str(tmp_path / "prefs.json"))
+        agent_prefs.set_model_pref("summarizer", "deepseek", "deepseek-chat")
+        assert agent_prefs.get_model_pref("summarizer") == {"provider": "deepseek", "model_id": "deepseek-chat"}
+        # 清除 → 回落项目默认
+        agent_prefs.set_model_pref("summarizer", None, None)
+        assert agent_prefs.get_model_pref("summarizer") is None
+
+
+class TestSessionBody:
+    """chat 会话创建 body 组装（模型偏好注入）。"""
+
+    def _body(self, pref):
+        body = {}
+        if pref and pref.get("provider") and pref.get("model_id"):
+            body["provider"] = pref["provider"]
+            body["modelId"] = pref["model_id"]
+        return body
+
+    def test_with_pref(self, monkeypatch):
+        import agent_prefs
+        monkeypatch.setattr(agent_prefs, "get_model_pref", lambda aid: {"provider": "deepseek", "model_id": "deepseek-chat"})
+        assert self._body(agent_prefs.get_model_pref("x")) == {"provider": "deepseek", "modelId": "deepseek-chat"}
+
+    def test_without_pref(self, monkeypatch):
+        import agent_prefs
+        monkeypatch.setattr(agent_prefs, "get_model_pref", lambda aid: None)
+        assert self._body(agent_prefs.get_model_pref("x")) == {}
+
+
+class TestVaultTranslation:
+    """Vault 更新翻译（None value = 保留现有值）。"""
+
+    def test_translate(self):
+        from routes.agents import VaultEntry, VaultUpdateRequest
+        req = VaultUpdateRequest(entries=[
+            VaultEntry(key="API_KEY", value="sk-123"),
+            VaultEntry(key="KEEP_ME", value=None),
+        ])
+        out = [{"key": e.key, "value": e.value} if e.value is not None else {"key": e.key} for e in req.entries]
+        assert out == [{"key": "API_KEY", "value": "sk-123"}, {"key": "KEEP_ME"}]
