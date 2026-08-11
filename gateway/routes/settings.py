@@ -328,9 +328,16 @@ _CHANNEL_PAYLOADS = {
 
 
 @router.get("/channels")
-async def list_channels():
+async def list_channels(user: User = Depends(require_admin)):
     config = _load_config()
-    return {"channels": config.get("channels", [])}
+    channels = []
+    for c in config.get("channels", []):
+        c = dict(c)
+        if c.get("bot_token"):
+            c["bot_token"] = "***"  # 掩码：令牌只写不回（评审 P1-5）
+            c["bot_token_masked"] = True
+        channels.append(c)
+    return {"channels": channels}
 
 
 @router.post("/channels")
@@ -347,9 +354,12 @@ async def update_channel(channel_id: str, channel: ChannelConfig, user: User = D
     channels = config.get("channels", [])
     for i, c in enumerate(channels):
         if c["id"] == channel_id:
-            channels[i] = channel.model_dump()
+            payload = channel.model_dump()
+            if payload.get("bot_token") == "***":
+                payload["bot_token"] = c.get("bot_token")  # 掩码占位 → 保留现有令牌
+            channels[i] = payload
             _save_config(config)
-            return {"success": True, "channel": channel.model_dump()}
+            return {"success": True, "channel": payload}
     raise HTTPException(status_code=404, detail="渠道不存在")
 
 

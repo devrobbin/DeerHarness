@@ -87,6 +87,23 @@ async def _publish(task_id: str, event: str, data: dict):
     await push_event(event, data, f"evolution:{task_id}")
 
 
+# 任务级互斥：防止 approve/reject/start 并发触发双轮执行（评审 P1-10）
+_task_locks: dict[str, asyncio.Lock] = {}
+
+
+def _task_lock(task_id: str) -> asyncio.Lock:
+    return _task_locks.setdefault(task_id, asyncio.Lock())
+
+
+def _rejected_proposals(task: dict) -> list[str]:
+    """已拒绝方案的 reason 摘要（负面样本，防止下一轮原样再提）。"""
+    try:
+        meta = json.loads(task.get("meta") or "{}")
+        return meta.get("rejected", [])
+    except (json.JSONDecodeError, TypeError):
+        return []
+
+
 # ==================== 目标解析 ====================
 
 
@@ -114,7 +131,7 @@ async def _resolve_evolution_target(task: dict) -> tuple[str, list[dict], bool]:
     _apply_member_overrides(team, team_id)
     synced, changed = _write_subagents_config(team)
     if changed:
-        _restart_deerflow_gateway()
+        await _restart_deerflow_gateway()
     runner = await _sync_orchestrator(team_id, team)
 
     if ttype == "workflow":
@@ -193,6 +210,11 @@ async def _propose_improvement(
         "若问题在特定成员产出 → target=member_prompt 且 member_id 填该成员 agent_id。new_text 为改进后的完整文本。",
         "agent": "改进目标：该 agent 的系统提示。target 固定为 member_prompt，member_id 填 agent_id。",
     }[task["target_type"]]
+    rejected = _rejected_proposals(task)
+    rejected_hint = (
+        "\n以下方案已被人工拒绝，请勿重复或近似重复：\n- " + "\n- ".join(rejected[:5])
+        if rejected else ""
+    )
     prompt = (
         "你是进化工程师。基于以下团队评测的低分用例，生成一个改进方案。\n"
         f"目标类型：{task['target_type']}（team={task['team_id']} workflow={task['workflow_id']} agent={task['agent_id']}）\n"
@@ -201,6 +223,8 @@ async def _propose_improvement(
         "输出严格 JSON（不要代码块）：{\"target\": \"workflow_task\"|\"soul\"|\"member_prompt\", "
         "\"member_id\": \"\", \"new_text\": \"改进后的完整文本\", \"reason\": \"一句话理由\"}\n"
         "约束：new_text 必须完整可替换（不是片段）；不改变核心业务目标；中文；长度不超过 2500 字符。"
+        + (" 若 target=soul：必须原样保留 {team_members} 占位符（运行时注入成员清单）。" if task["target_type"] == "team" else "")
+        + rejected_hint
     )
     try:
         resp = httpx.post(
@@ -289,16 +313,17 @@ async def _apply_proposal(task_id: str, proposal: dict) -> None:
 
 
 async def _advance(task_id: str) -> None:
-    try:
-        await _advance_inner(task_id)
-    except Exception as exc:
-        import logging
-        logging.getLogger("deerharness").error("evolution %s failed: %s", task_id, exc)
-        store.update_task(task_id, status="failed")
+    async with _task_lock(task_id):
         try:
-            await _publish(task_id, "evolution_done", {"status": "failed", "reason": str(exc)[:200]})
-        except Exception:
-            pass
+            await _advance_inner(task_id)
+        except Exception as exc:
+            import logging
+            logging.getLogger("deerharness").error("evolution %s failed: %s", task_id, exc)
+            store.update_task(task_id, status="failed")
+            try:
+                await _publish(task_id, "evolution_done", {"status": "failed", "reason": str(exc)[:200]})
+            except Exception:
+                pass
 
 
 async def _advance_inner(task_id: str) -> None:
@@ -386,6 +411,16 @@ async def _advance_inner(task_id: str) -> None:
     # 6. 自动应用并继续
     await _apply_proposal(task_id, proposal)
     asyncio.create_task(_advance(task_id))
+
+
+async def reconcile_stale_tasks() -> None:
+    """启动时恢复：进程重启后 running 任务续跑（评审 P1-3）。
+
+    在 main lifespan 调用；waiting_approval 任务保持等待（审批数据持久化）。
+    """
+    for t in store.list_tasks(limit=100):
+        if t.get("status") == "running":
+            asyncio.create_task(_advance(t["task_id"]))
 
 
 # ==================== HTTP 端点 ====================
@@ -484,16 +519,23 @@ async def evolution_approve(task_id: str, req: ApprovalRequest, user: User = Dep
     task = store.get_task(task_id)
     if not task:
         raise HTTPException(status_code=404, detail="进化任务不存在")
+    if task["status"] != "waiting_approval":
+        raise HTTPException(status_code=400, detail=f"任务当前状态 {task['status']}，不可审批")
+    # approval 必须属于本任务（防跨任务误置位）
+    pending = store.list_approvals(task_id, "pending")
+    if not any(a["id"] == req.approval_id for a in pending):
+        raise HTTPException(status_code=400, detail="审批不存在或不属于该任务")
     ok = store.set_approval_status(req.approval_id, "approved")
     if not ok:
         raise HTTPException(status_code=400, detail="审批不存在或已处理")
-    proposal = None
-    for a in store.list_approvals(task_id, "approved"):
-        if a["id"] == req.approval_id:
-            proposal = a["proposal"]
-    if not proposal:
-        raise HTTPException(status_code=400, detail="审批方案缺失")
-    await _apply_proposal(task_id, proposal)
+    proposal = next(a["proposal"] for a in pending if a["id"] == req.approval_id)
+    try:
+        await _apply_proposal(task_id, proposal)
+    except Exception:
+        # 应用失败 → 回滚审批为 pending，任务保持 waiting_approval，可重试
+        store.set_approval_status(req.approval_id, "pending")
+        store.update_task(task_id, status="waiting_approval")
+        raise
     store.update_task(task_id, status="running")
     asyncio.create_task(_advance(task_id))
     return {"success": True}
@@ -502,9 +544,24 @@ async def evolution_approve(task_id: str, req: ApprovalRequest, user: User = Dep
 @router.post("/tasks/{task_id}/reject")
 async def evolution_reject(task_id: str, req: ApprovalRequest, user: User = Depends(require_admin)):
     """拒绝改进方案：跳过本方案，继续下一轮评估。"""
+    task = store.get_task(task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="进化任务不存在")
+    pending = store.list_approvals(task_id, "pending")
+    proposal = next((a["proposal"] for a in pending if a["id"] == req.approval_id), None)
     ok = store.set_approval_status(req.approval_id, "rejected")
     if not ok:
         raise HTTPException(status_code=400, detail="审批不存在或已处理")
+    # 记录负面样本，防止下一轮原样再提
+    if proposal and proposal.get("reason"):
+        try:
+            meta = json.loads(task.get("meta") or "{}")
+            rejected = list(meta.get("rejected", []))
+            rejected.append(str(proposal["reason"])[:120])
+            meta["rejected"] = rejected[-10:]
+            store.update_task(task_id, meta=json.dumps(meta, ensure_ascii=False))
+        except (json.JSONDecodeError, TypeError):
+            pass
     store.update_task(task_id, status="running")
     asyncio.create_task(_advance(task_id))
     return {"success": True}

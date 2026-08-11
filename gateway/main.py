@@ -1,4 +1,5 @@
 from contextlib import asynccontextmanager
+import asyncio
 import logging
 
 from fastapi import Depends, FastAPI
@@ -24,6 +25,8 @@ async def lifespan(app: FastAPI):
     admin = bootstrap_admin()
     if admin:
         print(f"[bootstrap] 已创建管理员账号: {admin.username} (role={admin.role})")
+    # 恢复悬挂的进化任务（进程重启后 running 任务续跑）
+    asyncio.create_task(evolution.reconcile_stale_tasks())
     yield
     # 关闭上游客户端会话
     for client in (agents.penguin, chat.deerflow, fusion.penguin, fusion.deerflow):

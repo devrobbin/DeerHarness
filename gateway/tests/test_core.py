@@ -365,3 +365,107 @@ class TestSettingsGuards:
         assert "require_developer" in sig(evolution_start)
         assert "require_admin" in sig(fusion_team_sync)
         assert "require_developer" in sig(fusion_team_run)
+
+
+class TestEvolutionEngine:
+    """进化引擎状态机（P1: 最高风险逻辑回归保护）。"""
+
+    def _mk_task(self, tmp_path, monkeypatch, **over):
+        import evolution_store as es
+        monkeypatch.setattr(es, "DB_FILE", str(tmp_path / "evo.db"))
+        monkeypatch.setattr(es, "_initialized", False)
+        es.init_db()
+        tid = "evolve-test"
+        es.create_task(tid, "workflow", team_id="amazon-ops", workflow_id="ad-review",
+                       max_rounds=over.get("max_rounds", 2), target_score=over.get("target_score", 99))
+        return es, tid
+
+    def _patch_pipeline(self, monkeypatch, score=50.0, proposal=None):
+        """桩掉评估/评分/方案，驱动状态机。"""
+        import routes.evolution as evo
+        async def fake_resolve(task):
+            return "dh-orchestrator-amazon", [{"id": "c1", "title": "t", "statement": "s"}], True
+        async def fake_run(a, s):
+            return "reply", "success"
+        async def fake_score(results):
+            return [{"id": "c1", "title": "t", "score": score, "comment": "c", "reply": "r", "statement": "s"}]
+        async def fake_propose(scored, task, blocked):
+            return proposal
+        monkeypatch.setattr(evo, "_resolve_evolution_target", fake_resolve)
+        monkeypatch.setattr(evo, "_run_team_case", fake_run)
+        monkeypatch.setattr(evo, "_score_replies", fake_score)
+        monkeypatch.setattr(evo, "_propose_improvement", fake_propose)
+        monkeypatch.setattr(evo, "_apply_proposal", lambda tid, p: asyncio_run_store())
+
+    def test_approval_gate_then_apply(self, tmp_path, monkeypatch):
+        """评估 → 低分 → 方案 → waiting_approval；审批后应用并推进。"""
+        import asyncio
+        import routes.evolution as evo
+        es, tid = self._mk_task(tmp_path, monkeypatch)
+
+        applied = {}
+        async def fake_apply(tid, proposal):
+            applied["p"] = proposal
+        async def fake_resolve(task):
+            return "orchestrator", [{"id": "c1", "title": "t", "statement": "s"}], True
+        async def fake_run(a, s):
+            return "reply", "success"
+        async def fake_score(results):
+            return [{"id": "c1", "title": "t", "score": 50, "comment": "c", "reply": "r", "statement": "s"}]
+        async def fake_propose(scored, task, blocked):
+            return {"target": "workflow_task", "new_text": "新模板", "reason": "低分"}
+
+        monkeypatch.setattr(evo, "_resolve_evolution_target", fake_resolve)
+        monkeypatch.setattr(evo, "_run_team_case", fake_run)
+        monkeypatch.setattr(evo, "_score_replies", fake_score)
+        monkeypatch.setattr(evo, "_propose_improvement", fake_propose)
+        monkeypatch.setattr(evo, "_apply_proposal", fake_apply)
+        monkeypatch.setattr(evo, "_publish", lambda *a, **k: asyncio.sleep(0))
+
+        asyncio.run(evo._advance(tid))
+        task = es.get_task(tid)
+        assert task["status"] == "waiting_approval"
+        assert task["last_avg_score"] == 50.0
+        approvals = es.list_approvals(tid)
+        assert len(approvals) == 1
+
+        # 审批：状态校验 + 应用 + 恢复运行
+        asyncio.run(evo._advance(tid))  # 非 waiting_approval 不推进
+        task = es.get_task(tid)
+        assert task["status"] == "waiting_approval"
+
+    def test_approve_wrong_status_rejected(self, tmp_path, monkeypatch):
+        """approve 校验：任务非 waiting_approval 时 400。"""
+        import routes.evolution as evo
+        from fastapi import HTTPException
+        es, tid = self._mk_task(tmp_path, monkeypatch)
+        # 任务仍 running（无审批）→ approve 应 400
+        try:
+            asyncio_run(evo.evolution_approve(tid, type("R", (), {"approval_id": 1})()))
+            raise AssertionError("应拒绝非 waiting_approval 的审批")
+        except HTTPException as e:
+            assert e.status_code == 400
+
+    def test_target_met_stops(self, tmp_path, monkeypatch):
+        """达标即止 → success。"""
+        import asyncio
+        import routes.evolution as evo
+        es, tid = self._mk_task(tmp_path, monkeypatch, target_score=40)
+        async def fake_resolve(task):
+            return "o", [{"id": "c1", "title": "t", "statement": "s"}], True
+        async def fake_run(a, s):
+            return "reply", "success"
+        async def fake_score(results):
+            return [{"id": "c1", "title": "t", "score": 90, "comment": "c", "reply": "r", "statement": "s"}]
+        monkeypatch.setattr(evo, "_resolve_evolution_target", fake_resolve)
+        monkeypatch.setattr(evo, "_run_team_case", fake_run)
+        monkeypatch.setattr(evo, "_score_replies", fake_score)
+        monkeypatch.setattr(evo, "_publish", lambda *a, **k: asyncio.sleep(0))
+        asyncio.run(evo._advance(tid))
+        assert es.get_task(tid)["status"] == "success"
+        assert es.get_task(tid)["last_avg_score"] == 90.0
+
+
+def asyncio_run(coro):
+    import asyncio
+    return asyncio.run(coro)

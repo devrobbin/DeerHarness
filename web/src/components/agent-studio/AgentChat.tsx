@@ -144,7 +144,7 @@ export function AgentChat() {
           <div key={i} className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
             <div
               className={`max-w-[85%] rounded-lg px-3 py-2 text-sm ${
-                m.role === 'user' ? 'bg-blue-500 text-white' : 'bg-gray-100 text-gray-800'
+                m.role === 'user' ? 'bg-blue-500 text-white' : 'bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-100'
               }`}
             >
               <Markdown content={m.content} invert={m.role === 'user'} />

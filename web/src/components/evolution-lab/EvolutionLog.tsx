@@ -10,7 +10,7 @@ export function EvolutionLog({ taskId }: Props) {
   const { messages, connected } = useWebSocket(taskId ? `evolution/${taskId}` : undefined);
 
   return (
-    <div className="rounded-lg border border-gray-200 bg-white p-4">
+    <div className="rounded-lg border border-gray-200 bg-white p-4 dark:border-gray-700 dark:bg-gray-800">
       <div className="mb-3 flex items-center justify-between">
         <h2 className="font-semibold">📋 进化事件流</h2>
         <span className={`text-xs ${connected ? 'text-green-500' : 'text-gray-400'}`}>

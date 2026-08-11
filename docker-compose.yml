@@ -20,10 +20,18 @@ services:
     environment:
       - PENGUIN_API=http://host.docker.internal:7368
       - PENGUIN_USER_ID=admin
-      - PENGUIN_PASSWORD=${PENGUIN_PASSWORD:-penguin-3983}
+      - PENGUIN_PASSWORD=${PENGUIN_PASSWORD:?必须设置 PENGUIN_PASSWORD（禁止默认口令）}
       - DEERFLOW_API=http://host.docker.internal:2026
+      - DEERFLOW_EMAIL=${DEERFLOW_EMAIL:?必须设置 DEERFLOW_EMAIL}
+      - DEERFLOW_PASSWORD=${DEERFLOW_PASSWORD:?必须设置 DEERFLOW_PASSWORD}
+      - ADMIN_API_KEY=${ADMIN_API_KEY:?必须设置 ADMIN_API_KEY}
+      - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY:-}
+      - DEERFLOW_CONFIG=/app/deer-flow-run/config.yaml
+      - DEERFLOW_COMPOSE_DIR=/app/deer-flow
     volumes:
       - gateway_config:/app/config
+      - ../deer-flow-run:/app/deer-flow-run:ro
+      - ../deer-flow:/app/deer-flow:ro
     extra_hosts:
       - "host.docker.internal:host-gateway"
 

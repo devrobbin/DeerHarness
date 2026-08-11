@@ -53,6 +53,8 @@ DEERFLOW_COMPOSE_DIR = config.DEERFLOW_COMPOSE_DIR
 # 子代理配置写锁 + 上次写入指纹（hash 比对，避免每次请求重写/重启）
 _config_lock = threading.Lock()
 _last_config_hash: Optional[str] = None
+_last_restart_at: Optional[float] = None
+_RESTART_DEDUP_S = 120.0  # 并发重启去重窗口（评审 P1-4）
 
 # penguin prompt 同步时的净化包装（来源声明 + 环境失配提示 + 截断上限）
 _PROMPT_WRAPPER = (
@@ -259,6 +261,8 @@ async def fusion_chat(req: FusionChatRequest, user: User = Depends(require_devel
     req.agent_id = valid_id(req.agent_id, "agent_id")
     project_id = valid_id(req.project_id or "default_project", "project_id")
     thread_id = req.thread_id or f"dh-fusion-{uuid.uuid4().hex[:12]}"
+    if req.thread_id:
+        thread_id = valid_id(thread_id, "thread_id")
     deerflow_agent = await _sync_agent(req.agent_id, project_id)
     try:
         await _proxy_df("POST", "/api/threads", json={"thread_id": thread_id})
@@ -627,12 +631,21 @@ def _write_subagents_config(team: list[dict]) -> tuple[list[str], bool]:
     return [m["agent_id"] for m in team], changed
 
 
-def _restart_deerflow_gateway() -> None:
+async def _restart_deerflow_gateway() -> None:
     """重启 deer-flow gateway 容器（仅配置变更时由调用方触发）。
 
-    使用 `compose restart`（不重建镜像，快且不丢运行态）。
+    异步化（评审 P1-3）：subprocess 阻塞最长 120s 会冻结整个事件循环，
+    移入线程池；ready 轮询改 asyncio.sleep。
+    进程内去重：120s 内重复触发直接等待就绪，不重复执行 docker restart。
     """
-    try:
+    global _last_restart_at
+    now = time.monotonic()
+    if _last_restart_at and now - _last_restart_at < _RESTART_DEDUP_S:
+        await _wait_deerflow_ready()
+        return
+    _last_restart_at = now
+
+    def _run() -> None:
         subprocess.run(
             ["docker", "compose", "-f", "docker/docker-compose.yaml", "restart", "gateway"],
             cwd=DEERFLOW_COMPOSE_DIR,
@@ -640,17 +653,20 @@ def _restart_deerflow_gateway() -> None:
             timeout=120,
             check=True,
         )
+
+    try:
+        await asyncio.to_thread(_run)
     except subprocess.CalledProcessError as exc:
         raise HTTPException(
             status_code=500,
             detail=f"重启 deer-flow 失败: {exc.stderr.decode(errors='ignore')[:200]}",
         )
     # 等待容器就绪（修复：重启窗口期请求 502）
-    _wait_deerflow_ready()
+    await _wait_deerflow_ready()
 
 
-def _wait_deerflow_ready(timeout_s: float = 60.0) -> None:
-    """轮询 deer-flow 登录直到成功，避免 restart 窗口期 502。"""
+async def _wait_deerflow_ready(timeout_s: float = 60.0) -> None:
+    """轮询 deer-flow 登录直到成功，避免 restart 窗口期 502（异步版）。"""
     import httpx as _httpx
 
     deadline = time.monotonic() + timeout_s
@@ -670,7 +686,7 @@ def _wait_deerflow_ready(timeout_s: float = 60.0) -> None:
                 return
         except Exception:
             pass
-        time.sleep(2)
+        await asyncio.sleep(2)
     raise HTTPException(status_code=503, detail="deer-flow 重启后未就绪")
 
 
@@ -693,7 +709,7 @@ async def fusion_team_sync(req: Optional[FusionTeamSyncRequest] = None, user: Us
 
     synced, changed = _write_subagents_config(team)
     if changed:
-        _restart_deerflow_gateway()
+        await _restart_deerflow_gateway()
     return {"success": True, "team": synced, "config": DEERFLOW_CONFIG, "restarted": changed}
 
 
@@ -719,7 +735,10 @@ async def _sync_orchestrator(template: str, team_members: list[dict]) -> str:
     members_text = "\n".join(
         f"- {m['agent_id']}：{m['name']} — {_member_desc(m)}" for m in team_members
     )
-    soul = evolution_store.get_effective_soul(template, spec["soul"]).format(team_members=members_text)
+    soul = evolution_store.get_effective_soul(template, spec["soul"])
+    # replace 而非 format：覆盖后的 soul 可能丢失占位符或含花括号（LLM 生成），
+    # .format 会抛 KeyError/ValueError；replace 无此风险
+    soul = soul.replace("{team_members}", members_text)
     name = spec["name"]
     agents = await _proxy_df("GET", "/api/agents")
     exists = any(a.get("name") == name for a in agents.get("agents", []))
@@ -1034,7 +1053,7 @@ async def _prepare_team(
     synced, changed = _write_subagents_config(team)
     if changed:
         # 仅配置变化才重启（评审 B：避免每次请求杀并发 run）
-        _restart_deerflow_gateway()
+        await _restart_deerflow_gateway()
 
     # 模板主代理（可选）：soul 注入真实团队清单
     orchestrator = None

@@ -26,7 +26,7 @@ export function ScoreChart({ taskId }: Props) {
   }, [taskId]);
 
   return (
-    <div className="rounded-lg border border-gray-200 bg-white p-4">
+    <div className="rounded-lg border border-gray-200 bg-white p-4 dark:border-gray-700 dark:bg-gray-800">
       <h2 className="mb-3 font-semibold">📈 版本得分对比</h2>
       {taskId ? (
         versions.length > 0 ? (
@@ -34,7 +34,7 @@ export function ScoreChart({ taskId }: Props) {
             {versions.map(v => (
               <div key={v.version} className="flex items-center gap-3 text-sm">
                 <span className="w-24 shrink-0 font-mono text-xs">{v.version}</span>
-                <div className="h-6 flex-1 rounded bg-gray-100">
+                <div className="h-6 flex-1 rounded bg-gray-100 dark:bg-gray-700">
                   <div
                     className="flex h-6 items-center rounded bg-gradient-to-r from-purple-400 to-blue-500 px-2 text-xs text-white"
                     style={{ width: `${Math.max(4, (v.score ?? 0) * 1.2)}%` }}

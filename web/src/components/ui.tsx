@@ -59,11 +59,11 @@ export function Badge({
   color?: 'green' | 'red' | 'gray' | 'purple' | 'amber';
 }) {
   const styles = {
-    green: 'bg-green-100 text-green-700',
-    red: 'bg-red-100 text-red-600',
-    gray: 'bg-gray-100 text-gray-600',
-    purple: 'bg-purple-100 text-purple-700',
-    amber: 'bg-amber-100 text-amber-700',
+    green: 'bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-300',
+    red: 'bg-red-100 text-red-600 dark:bg-red-900/40 dark:text-red-300',
+    gray: 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300',
+    purple: 'bg-purple-100 text-purple-700 dark:bg-purple-900/40 dark:text-purple-300',
+    amber: 'bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300',
   }[color];
   return <span className={`inline-block rounded px-2 py-0.5 text-xs ${styles}`}>{children}</span>;
 }
