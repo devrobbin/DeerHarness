@@ -41,6 +41,15 @@ export async function apiPost<T = any>(path: string, body?: unknown): Promise<T>
   return handle(res, path);
 }
 
+export async function apiPut<T = any>(path: string, body?: unknown): Promise<T> {
+  const res = await fetch(`${GATEWAY}${path}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json', ...authHeaders() },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+  return handle(res, path);
+}
+
 export async function apiDelete<T = any>(path: string): Promise<T> {
   const res = await fetch(`${GATEWAY}${path}`, { method: 'DELETE', headers: authHeaders() });
   return handle(res, path);

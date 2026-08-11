@@ -1,11 +1,31 @@
+"""统一设置路由：模型 / 技能 / MCP / 渠道 / 安全策略 + 系统信息。
+
+移植自上游 WebUI：
+- PenguinHarness models-page：模型连通性测试（真实 HTTP 探测 + 延迟）
+- DeerFlow tool-settings：MCP 启用开关 / 状态
+- DeerFlow channels-settings：渠道连接状态测试
+- DeerFlow about-settings：系统信息展示
+
+存储为 JSON 文件（gateway/config/settings.json），全部端点受 API Key 保护。
+"""
+
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from typing import Optional
+import asyncio
+import httpx
 import json
 import os
+import shlex
+import subprocess
+import time
+
+import config
 
 
 router = APIRouter()
+
+VERSION = "0.5.0"
 
 CONFIG_FILE = os.path.join(os.path.dirname(__file__), "..", "config", "settings.json")
 
@@ -47,6 +67,14 @@ class ModelConfig(BaseModel):
     temperature: float = 0.7
 
 
+_PROVIDER_DEFAULTS = {
+    "deepseek": "https://api.deepseek.com",
+    "openai": "https://api.openai.com/v1",
+    "anthropic": "https://api.anthropic.com",
+    "local": "",
+}
+
+
 @router.get("/models")
 async def list_models():
     config = _load_config()
@@ -61,12 +89,86 @@ async def add_model(model: ModelConfig):
     return {"success": True, "model": model.model_dump()}
 
 
+@router.put("/models/{model_id}")
+async def update_model(model_id: str, model: ModelConfig):
+    """编辑模型（移植 PenguinHarness ModelDialog 的完整字段）。"""
+    config = _load_config()
+    models = config.get("models", [])
+    for i, m in enumerate(models):
+        if m["id"] == model_id:
+            models[i] = model.model_dump()
+            _save_config(config)
+            return {"success": True, "model": model.model_dump()}
+    raise HTTPException(status_code=404, detail="模型不存在")
+
+
 @router.delete("/models/{model_id}")
 async def delete_model(model_id: str):
     config = _load_config()
     config["models"] = [m for m in config.get("models", []) if m["id"] != model_id]
     _save_config(config)
     return {"success": True}
+
+
+class ModelTestRequest(BaseModel):
+    """连通性测试：提交未保存的表单草稿也能测（移植 Penguin /models/test）。"""
+
+    id: Optional[str] = None
+    name: str
+    provider: str
+    base_url: Optional[str] = None
+    api_key: Optional[str] = None
+    api_key_env: Optional[str] = None
+
+
+@router.post("/models/test")
+async def test_model(req: ModelTestRequest):
+    """真实 HTTP 探测模型连通性：最小 chat completion + 延迟测量。
+
+    trust_env=False：避免本机系统代理拦截外网请求（与 penguin_client 一致）。
+    """
+    base_url = (req.base_url or _PROVIDER_DEFAULTS.get(req.provider) or "").rstrip("/")
+    if not base_url:
+        raise HTTPException(status_code=400, detail="本地模型必须提供 base_url")
+
+    api_key = (
+        req.api_key
+        or (os.environ.get(req.api_key_env) if req.api_key_env else None)
+        or (config.DEEPSEEK_API_KEY if req.provider == "deepseek" else None)
+    )
+    if not api_key:
+        raise HTTPException(
+            status_code=400,
+            detail="未提供 API Key（可传入 api_key 或配置 api_key_env / DEEPSEEK_API_KEY）",
+        )
+
+    headers = {"Authorization": f"Bearer {api_key}"}
+    if req.provider == "anthropic":
+        headers = {"x-api-key": api_key, "anthropic-version": "2023-06-01"}
+        endpoint = f"{base_url}/v1/messages"
+        payload = {"model": req.name, "max_tokens": 1, "messages": [{"role": "user", "content": "ping"}]}
+    else:
+        endpoint = f"{base_url}/chat/completions"
+        payload = {"model": req.name, "messages": [{"role": "user", "content": "ping"}], "max_tokens": 1}
+
+    try:
+        async with httpx_async_client() as client:
+            start = time.perf_counter()
+            resp = await client.post(endpoint, headers=headers, json=payload)
+            latency = round((time.perf_counter() - start) * 1000, 1)
+            if resp.status_code < 300:
+                return {"ok": True, "latency_ms": latency, "message": f"HTTP {resp.status_code} · {latency}ms"}
+            # 兼容未实现 /chat/completions 的服务端：退回 /models 列表
+            if resp.status_code in (404, 405, 501):
+                start = time.perf_counter()
+                resp2 = await client.get(f"{base_url}/models", headers=headers)
+                latency = round((time.perf_counter() - start) * 1000, 1)
+                if resp2.status_code < 300:
+                    return {"ok": True, "latency_ms": latency, "message": f"HTTP {resp2.status_code} (/models) · {latency}ms"}
+                return {"ok": False, "latency_ms": latency, "message": f"HTTP {resp2.status_code}: {resp2.text[:160]}"}
+            return {"ok": False, "latency_ms": latency, "message": f"HTTP {resp.status_code}: {resp.text[:160]}"}
+    except (httpx.TimeoutException, httpx.ConnectError) as exc:
+        return {"ok": False, "latency_ms": None, "message": f"连接失败: {exc}"}
 
 
 # ==================== 技能管理 ====================
@@ -78,6 +180,7 @@ class SkillConfig(BaseModel):
     description: str
     type: str  # tool / workflow / prompt_template
     config: dict = {}
+    enabled: bool = True
 
 
 @router.get("/skills")
@@ -92,6 +195,18 @@ async def add_skill(skill: SkillConfig):
     config.setdefault("skills", []).append(skill.model_dump())
     _save_config(config)
     return {"success": True, "skill": skill.model_dump()}
+
+
+@router.put("/skills/{skill_id}")
+async def update_skill(skill_id: str, skill: SkillConfig):
+    config = _load_config()
+    skills = config.get("skills", [])
+    for i, s in enumerate(skills):
+        if s["id"] == skill_id:
+            skills[i] = skill.model_dump()
+            _save_config(config)
+            return {"success": True, "skill": skill.model_dump()}
+    raise HTTPException(status_code=404, detail="技能不存在")
 
 
 @router.delete("/skills/{skill_id}")
@@ -112,6 +227,7 @@ class MCPServerConfig(BaseModel):
     command: Optional[str] = None
     url: Optional[str] = None
     env: dict = {}
+    enabled: bool = True
 
 
 @router.get("/mcp")
@@ -128,12 +244,75 @@ async def add_mcp_server(server: MCPServerConfig):
     return {"success": True, "mcp_server": server.model_dump()}
 
 
+@router.put("/mcp/{server_id}")
+async def update_mcp_server(server_id: str, server: MCPServerConfig):
+    config = _load_config()
+    servers = config.get("mcp_servers", [])
+    for i, s in enumerate(servers):
+        if s["id"] == server_id:
+            servers[i] = server.model_dump()
+            _save_config(config)
+            return {"success": True, "mcp_server": server.model_dump()}
+    raise HTTPException(status_code=404, detail="MCP 服务器不存在")
+
+
 @router.delete("/mcp/{server_id}")
 async def delete_mcp_server(server_id: str):
     config = _load_config()
     config["mcp_servers"] = [s for s in config.get("mcp_servers", []) if s["id"] != server_id]
     _save_config(config)
     return {"success": True}
+
+
+def _test_stdio(command: str, env: dict) -> dict:
+    """stdio 探测：启动进程观察 2 秒，存活或正常退出视为 OK（移植 DeerFlow MCP 状态）。"""
+    cmd = shlex.split(command)
+    full_env = os.environ.copy()
+    full_env.update(env)
+    start = time.perf_counter()
+    try:
+        proc = subprocess.Popen(cmd, env=full_env, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True)
+    except FileNotFoundError as exc:
+        return {"ok": False, "latency_ms": None, "message": f"命令不存在: {exc}"}
+    try:
+        returncode = proc.wait(timeout=2)
+        latency = round((time.perf_counter() - start) * 1000, 1)
+        if returncode == 0:
+            return {"ok": True, "latency_ms": latency, "message": f"进程启动并正常退出 · {latency}ms"}
+        stderr = (proc.stderr.read() if proc.stderr else "")[:200]
+        return {"ok": False, "latency_ms": latency, "message": f"退出码 {returncode}: {stderr}"}
+    except subprocess.TimeoutExpired:
+        latency = round((time.perf_counter() - start) * 1000, 1)
+        proc.terminate()
+        return {"ok": True, "latency_ms": latency, "message": f"进程保持运行（2s 存活）· {latency}ms"}
+
+
+@router.post("/mcp/{server_id}/test")
+async def test_mcp_server(server_id: str):
+    config = _load_config()
+    server = next((s for s in config.get("mcp_servers", []) if s["id"] == server_id), None)
+    if not server:
+        raise HTTPException(status_code=404, detail="MCP 服务器不存在")
+
+    if server["transport"] == "sse":
+        url = server.get("url")
+        if not url:
+            raise HTTPException(status_code=400, detail="SSE 传输需要 URL")
+        try:
+            async with httpx_async_client(timeout=8) as client:
+                start = time.perf_counter()
+                resp = await client.get(url, headers={"Accept": "text/event-stream"})
+                latency = round((time.perf_counter() - start) * 1000, 1)
+            if resp.status_code < 400:
+                return {"ok": True, "latency_ms": latency, "message": f"HTTP {resp.status_code} · {latency}ms"}
+            return {"ok": False, "latency_ms": latency, "message": f"HTTP {resp.status_code}: {resp.text[:160]}"}
+        except (httpx.TimeoutException, httpx.ConnectError) as exc:
+            return {"ok": False, "latency_ms": None, "message": f"连接失败: {exc}"}
+
+    command = server.get("command")
+    if not command:
+        raise HTTPException(status_code=400, detail="stdio 传输需要 command")
+    return await asyncio.to_thread(_test_stdio, command, server.get("env") or {})
 
 
 # ==================== 渠道集成 ====================
@@ -146,6 +325,13 @@ class ChannelConfig(BaseModel):
     webhook_url: Optional[str] = None
     bot_token: Optional[str] = None
     enabled: bool = True
+
+
+_CHANNEL_PAYLOADS = {
+    # 各平台 webhook 的最小可识别消息结构
+    "feishu": lambda t: {"msg_type": "text", "content": {"text": t}},
+    "wechat": lambda t: {"msgtype": "text", "text": {"content": t}},
+}
 
 
 @router.get("/channels")
@@ -162,12 +348,47 @@ async def add_channel(channel: ChannelConfig):
     return {"success": True, "channel": channel.model_dump()}
 
 
+@router.put("/channels/{channel_id}")
+async def update_channel(channel_id: str, channel: ChannelConfig):
+    config = _load_config()
+    channels = config.get("channels", [])
+    for i, c in enumerate(channels):
+        if c["id"] == channel_id:
+            channels[i] = channel.model_dump()
+            _save_config(config)
+            return {"success": True, "channel": channel.model_dump()}
+    raise HTTPException(status_code=404, detail="渠道不存在")
+
+
 @router.delete("/channels/{channel_id}")
 async def delete_channel(channel_id: str):
     config = _load_config()
     config["channels"] = [c for c in config.get("channels", []) if c["id"] != channel_id]
     _save_config(config)
     return {"success": True}
+
+
+@router.post("/channels/{channel_id}/test")
+async def test_channel(channel_id: str):
+    """发送一条真实测试消息到 webhook（移植 DeerFlow channels 连接状态检查）。"""
+    config = _load_config()
+    channel = next((c for c in config.get("channels", []) if c["id"] == channel_id), None)
+    if not channel:
+        raise HTTPException(status_code=404, detail="渠道不存在")
+    url = channel.get("webhook_url")
+    if not url:
+        raise HTTPException(status_code=400, detail="未配置 webhook_url")
+
+    text = f"DeerHarness 渠道连通性测试 ✅ {time.strftime('%Y-%m-%d %H:%M:%S')}"
+    payload = (_CHANNEL_PAYLOADS.get(channel["type"]) or (lambda t: {"text": t}))(text)
+    try:
+        async with httpx_async_client(timeout=10) as client:
+            resp = await client.post(url, json=payload)
+        if resp.status_code < 400:
+            return {"ok": True, "status_code": resp.status_code, "message": f"测试消息已发送 · HTTP {resp.status_code}"}
+        return {"ok": False, "status_code": resp.status_code, "message": f"HTTP {resp.status_code}: {resp.text[:160]}"}
+    except (httpx.TimeoutException, httpx.ConnectError) as exc:
+        return {"ok": False, "status_code": None, "message": f"连接失败: {exc}"}
 
 
 # ==================== 安全策略 ====================
@@ -192,3 +413,39 @@ async def update_safety(safety: SafetyConfig):
     config["safety"] = safety.model_dump()
     _save_config(config)
     return {"success": True, "safety": safety.model_dump()}
+
+
+# ==================== 系统信息 ====================
+
+
+def httpx_async_client(timeout: float = 10.0):
+    """统一 HTTP 客户端：trust_env=False 避免系统代理拦截（与 penguin_client 一致）。"""
+    return httpx.AsyncClient(trust_env=False, timeout=timeout)
+
+
+@router.get("/system")
+async def get_system():
+    """系统信息：版本 + 上游健康 + 环境配置状态（移植 DeerFlow about / Penguin 状态）。
+
+    只暴露掩码后的配置状态，绝不返回密码/密钥原文。
+    """
+    from .dashboard import _check_penguin, _check_deerflow  # 延迟导入避免循环依赖
+
+    health = {"gateway": {"status": "up", "service": "deerharness-gateway"}}
+    health["penguin"] = await _check_penguin()
+    health["deerflow"] = await _check_deerflow()
+
+    return {
+        "version": VERSION,
+        "env": {
+            "penguin_api": config.PENGUIN_API,
+            "penguin_user": config.PENGUIN_USER_ID,
+            "deerflow_api": config.DEERFLOW_API,
+            "deerflow_config": config.DEERFLOW_CONFIG,
+            "deepseek_key_set": bool(config.DEEPSEEK_API_KEY),
+            "admin_key_set": bool(config.ADMIN_API_KEY),
+            "max_cost_per_request": config.MAX_COST_PER_REQUEST,
+            "cors_origins": list(config.CORS_ORIGINS),
+        },
+        "health": health,
+    }

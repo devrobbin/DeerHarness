@@ -6,6 +6,7 @@ import hashlib
 import hmac
 import json
 import os
+import secrets
 import time
 
 import config
@@ -59,6 +60,37 @@ def verify_api_key(api_key: str) -> Optional[User]:
         if hmac.compare_digest(u["api_key_hash"], key_hash):
             return User(**u)
     return None
+
+
+def rotate_user_key(user_id: str) -> Optional[str]:
+    """轮换用户 API Key，返回新密钥（仅此一次可见）。"""
+    users = _load_users()
+    for u in users:
+        if u["id"] == user_id:
+            new_key = secrets.token_hex(24)
+            u["api_key_hash"] = hashlib.sha256(new_key.encode()).hexdigest()
+            _save_users(users)
+            return new_key
+    return None
+
+
+def update_user_role(user_id: str, role: str) -> Optional[User]:
+    users = _load_users()
+    for u in users:
+        if u["id"] == user_id:
+            u["role"] = role
+            _save_users(users)
+            return User(**u)
+    return None
+
+
+def delete_user(user_id: str) -> bool:
+    users = _load_users()
+    if not any(u["id"] == user_id for u in users):
+        return False
+    users = [u for u in users if u["id"] != user_id]
+    _save_users(users)
+    return True
 
 
 def bootstrap_admin() -> Optional[User]:

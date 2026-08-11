@@ -1,85 +1,168 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
-
-const GATEWAY = process.env.NEXT_PUBLIC_GATEWAY_URL || 'http://localhost:8080';
+import React, { useCallback, useEffect, useState } from 'react';
+import { apiDelete, apiGet, apiPost, apiPut } from '@/lib/api';
+import { Badge, Button, Card, Input, tokens } from '@/components/ui';
 
 interface Skill {
   id: string;
   name: string;
   description: string;
   type: string;
+  config: Record<string, unknown>;
+  enabled: boolean;
 }
 
+const EMPTY_FORM = { name: '', description: '', type: 'tool', config: '{}', enabled: true };
+
+const TYPE_LABELS: Record<string, string> = { tool: '工具', workflow: '工作流', prompt_template: 'Prompt 模板' };
+
+/** 技能列表：启用开关移植 DeerFlow skill-settings 的 Switch 行模式 */
 export function SkillSettings() {
   const [skills, setSkills] = useState<Skill[]>([]);
-  const [showForm, setShowForm] = useState(false);
-  const [form, setForm] = useState({ name: '', description: '', type: 'tool' });
+  const [error, setError] = useState('');
+  const [editing, setEditing] = useState<Skill | 'new' | null>(null);
+  const [form, setForm] = useState(EMPTY_FORM);
 
-  const fetchSkills = async () => {
+  const fetchSkills = useCallback(async () => {
     try {
-      const res = await fetch(`${GATEWAY}/api/settings/skills`);
-      const data = await res.json();
+      const data = await apiGet<{ skills: Skill[] }>('/api/settings/skills');
       setSkills(data.skills);
-    } catch (err) { console.error(err); }
-  };
+      setError('');
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+  }, []);
 
-  useEffect(() => { fetchSkills(); }, []);
+  useEffect(() => { fetchSkills(); }, [fetchSkills]);
 
-  const handleAdd = async (e: React.FormEvent) => {
-    e.preventDefault();
-    await fetch(`${GATEWAY}/api/settings/skills`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ id: Date.now().toString(), ...form, config: {} }),
+  const openNew = () => { setForm(EMPTY_FORM); setEditing('new'); };
+
+  const openEdit = (s: Skill) => {
+    setForm({
+      name: s.name,
+      description: s.description,
+      type: s.type,
+      config: JSON.stringify(s.config ?? {}, null, 2),
+      enabled: s.enabled,
     });
-    setShowForm(false);
-    setForm({ name: '', description: '', type: 'tool' });
-    fetchSkills();
+    setEditing(s);
   };
 
-  const handleDelete = async (id: string) => {
-    await fetch(`${GATEWAY}/api/settings/skills/${id}`, { method: 'DELETE' });
-    fetchSkills();
+  const handleSave = async (e: React.FormEvent) => {
+    e.preventDefault();
+    let config: Record<string, unknown>;
+    try {
+      config = JSON.parse(form.config || '{}');
+    } catch {
+      setError('config 不是合法 JSON');
+      return;
+    }
+    try {
+      const body = { name: form.name, description: form.description, type: form.type, config, enabled: form.enabled };
+      if (editing === 'new') {
+        await apiPost('/api/settings/skills', { id: `s-${Date.now()}`, ...body });
+      } else if (editing) {
+        await apiPut(`/api/settings/skills/${editing.id}`, { id: editing.id, ...body });
+      }
+      setEditing(null);
+      await fetchSkills();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    }
+  };
+
+  const handleDelete = async (s: Skill) => {
+    if (!window.confirm(`删除技能「${s.name}」？`)) return;
+    try {
+      await apiDelete(`/api/settings/skills/${s.id}`);
+      await fetchSkills();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    }
+  };
+
+  const handleToggle = async (s: Skill) => {
+    try {
+      await apiPut(`/api/settings/skills/${s.id}`, { ...s, enabled: !s.enabled });
+      await fetchSkills();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    }
   };
 
   return (
     <div>
-      <div className="flex items-center justify-between mb-4">
-        <h2 className="text-lg font-semibold">技能管理</h2>
-        <button onClick={() => setShowForm(!showForm)} className="px-3 py-1.5 text-sm bg-blue-500 text-white rounded hover:bg-blue-600">
-          + 添加技能
-        </button>
+      <div className="mb-4 flex items-center justify-between">
+        <h2 className="text-lg font-semibold dark:text-gray-100">技能管理</h2>
+        <Button onClick={openNew} disabled={editing !== null}>+ 添加技能</Button>
       </div>
 
-      {showForm && (
-        <form onSubmit={handleAdd} className="mb-6 p-4 bg-gray-50 rounded-lg space-y-3">
-          <input placeholder="技能名称" value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} className="w-full p-2 border rounded text-sm" required />
-          <input placeholder="描述" value={form.description} onChange={e => setForm({ ...form, description: e.target.value })} className="w-full p-2 border rounded text-sm" />
-          <select value={form.type} onChange={e => setForm({ ...form, type: e.target.value })} className="w-full p-2 border rounded text-sm">
-            <option value="tool">工具</option>
-            <option value="workflow">工作流</option>
-            <option value="prompt_template">Prompt 模板</option>
-          </select>
-          <div className="flex gap-2">
-            <button type="submit" className="px-4 py-1.5 text-sm bg-green-500 text-white rounded">保存</button>
-            <button type="button" onClick={() => setShowForm(false)} className="px-4 py-1.5 text-sm bg-gray-300 rounded">取消</button>
-          </div>
-        </form>
+      {error && <p className="mb-3 rounded bg-red-50 px-3 py-2 text-sm text-red-600 dark:bg-red-900/30 dark:text-red-400">{error}</p>}
+
+      {editing && (
+        <Card className="mb-6 space-y-3">
+          <h3 className="text-sm font-medium text-gray-700 dark:text-gray-200">{editing === 'new' ? '新增技能' : '编辑技能'}</h3>
+          <form onSubmit={handleSave} className="space-y-3">
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="mb-1 block text-xs text-gray-500 dark:text-gray-400">名称</label>
+                <Input value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} required />
+              </div>
+              <div>
+                <label className="mb-1 block text-xs text-gray-500 dark:text-gray-400">类型</label>
+                <select value={form.type} onChange={e => setForm({ ...form, type: e.target.value })} className={tokens.input}>
+                  {Object.entries(TYPE_LABELS).map(([v, label]) => <option key={v} value={v}>{label}</option>)}
+                </select>
+              </div>
+            </div>
+            <div>
+              <label className="mb-1 block text-xs text-gray-500 dark:text-gray-400">描述</label>
+              <Input value={form.description} onChange={e => setForm({ ...form, description: e.target.value })} />
+            </div>
+            <div>
+              <label className="mb-1 block text-xs text-gray-500 dark:text-gray-400">config（JSON）</label>
+              <textarea
+                value={form.config}
+                onChange={e => setForm({ ...form, config: e.target.value })}
+                rows={5}
+                spellCheck={false}
+                className={`${tokens.input} font-mono text-xs`}
+              />
+            </div>
+            <div className="flex gap-2">
+              <Button type="submit">保存</Button>
+              <Button type="button" variant="ghost" onClick={() => setEditing(null)}>取消</Button>
+            </div>
+          </form>
+        </Card>
       )}
 
       <div className="space-y-2">
         {skills.map(s => (
-          <div key={s.id} className="flex items-center justify-between p-3 bg-white border rounded-lg">
-            <div>
-              <span className="font-medium">{s.name}</span>
-              <span className="ml-2 text-xs px-2 py-0.5 bg-purple-100 text-purple-700 rounded">{s.type}</span>
-              <p className="text-xs text-gray-500 mt-1">{s.description}</p>
+          <Card key={s.id} className="flex items-center justify-between gap-3">
+            <div className="min-w-0">
+              <div className="flex items-center gap-2">
+                <span className={`truncate font-medium ${s.enabled ? 'text-gray-800 dark:text-gray-100' : 'text-gray-400 dark:text-gray-500'}`}>{s.name}</span>
+                <Badge color={s.type === 'workflow' ? 'amber' : 'purple'}>{TYPE_LABELS[s.type] || s.type}</Badge>
+                {!s.enabled && <Badge color="gray">已禁用</Badge>}
+              </div>
+              <p className="mt-0.5 line-clamp-1 text-xs text-gray-500 dark:text-gray-400">{s.description}</p>
             </div>
-            <button onClick={() => handleDelete(s.id)} className="text-red-500 text-sm hover:text-red-700">删除</button>
-          </div>
+            <div className="flex shrink-0 items-center gap-2">
+              <button
+                onClick={() => handleToggle(s)}
+                title={s.enabled ? '禁用' : '启用'}
+                className={`relative h-5 w-9 rounded-full transition ${s.enabled ? 'bg-green-500' : 'bg-gray-300 dark:bg-gray-600'}`}
+              >
+                <span className={`absolute top-0.5 h-4 w-4 rounded-full bg-white shadow transition-all ${s.enabled ? 'left-[18px]' : 'left-0.5'}`} />
+              </button>
+              <Button variant="ghost" onClick={() => openEdit(s)}>编辑</Button>
+              <Button variant="danger" onClick={() => handleDelete(s)}>删除</Button>
+            </div>
+          </Card>
         ))}
-        {skills.length === 0 && <p className="text-center text-gray-400 py-8">暂无技能</p>}
+        {skills.length === 0 && <p className="py-8 text-center text-gray-400 dark:text-gray-500">暂无技能</p>}
       </div>
     </div>
   );

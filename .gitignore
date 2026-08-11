@@ -39,3 +39,9 @@ gateway/config/traces.json
 gateway/config/traces.db
 gateway/config/traces.db-*
 *.tsbuildinfo
+
+# 运行时数据（不入库）
+.dfhash.tmp
+gateway/config/users.json
+gateway/config/settings.json
+gateway/config/traces.db*
