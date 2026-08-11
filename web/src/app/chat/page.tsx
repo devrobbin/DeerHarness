@@ -193,6 +193,7 @@ export default function ChatPage() {
               {m.role === 'assistant' && m.content && (
                 <button
                   onClick={() => copyText(`msg-${i}`, m.content)}
+                  aria-label="复制回复内容"
                   className="absolute -right-2 -top-2 hidden rounded border border-gray-200 bg-white px-1.5 py-0.5 text-[10px] text-gray-500 shadow-sm hover:text-blue-600 group-hover:block"
                 >
                   {copied === `msg-${i}` ? '✓ 已复制' : '复制'}
@@ -201,7 +202,7 @@ export default function ChatPage() {
             </div>
           </div>
         ))}
-        {error && <p className="text-center text-sm text-red-500">{error}</p>}
+        {error && <p role="alert" className="text-center text-sm text-red-500">{error}</p>}
       </div>
 
       <div className="mt-4 flex gap-2">

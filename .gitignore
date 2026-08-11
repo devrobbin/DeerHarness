@@ -36,4 +36,6 @@ Thumbs.db
 
 # Gateway runtime data
 gateway/config/traces.json
+gateway/config/traces.db
+gateway/config/traces.db-*
 *.tsbuildinfo

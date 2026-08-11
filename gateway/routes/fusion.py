@@ -60,6 +60,35 @@ _PROMPT_WRAPPER = (
 )
 _MAX_PROMPT_CHARS = 8000
 
+# penguin builtin 工具 → deer-flow 工具白名单映射（评审遗留：修复 tools:null 能力放大）
+_PENGUIN_TOOL_MAP = {
+    "read_file": "read_file",
+    "write_file": "write_file",
+    "str_replace": "str_replace",
+    "list_dir": "ls",
+    "ls": "ls",
+    "glob": "glob",
+    "grep": "grep",
+    "web_search": "web_search",
+    "code_exec": "bash",
+    "shell": "bash",
+    "run_shell": "bash",
+}
+# penguin 无工具声明时的保守白名单（只读 + 搜索，不含 bash 执行）
+_DEFAULT_TOOL_WHITELIST = ["web_search", "read_file", "write_file", "glob", "grep"]
+
+
+def _map_penguin_tools(tool_names: list[str]) -> list[str]:
+    """penguin 工具名 → deer-flow 工具白名单（去重、保持顺序、跳过未知）。"""
+    mapped: list[str] = []
+    seen: set[str] = set()
+    for name in tool_names:
+        target = _PENGUIN_TOOL_MAP.get(name)
+        if target and target not in seen:
+            seen.add(target)
+            mapped.append(target)
+    return mapped or list(_DEFAULT_TOOL_WHITELIST)
+
 
 class FusionChatRequest(BaseModel):
     agent_id: str
@@ -100,18 +129,23 @@ async def _get_penguin_agent_def(agent_id: str, project_id: str) -> dict:
         raise HTTPException(status_code=resp.status_code, detail=resp.text)
     data = resp.json()
     prompt = ""
+    tools: list[str] = []
     yaml_text = data.get("systemConfigYaml") or ""
     if yaml_text:
         try:
             cfg = _yaml.safe_load(yaml_text) or {}
             prompt = str(cfg.get("system_prompt") or "")
+            builtin = ((cfg.get("tools") or {}).get("builtin") or [])
+            tools = _map_penguin_tools(
+                [t.get("name", "") for t in builtin if isinstance(t, dict)]
+            )
         except Exception:
             pass
     # 净化：包装来源声明 + 环境失配提示 + 截断上限（评审 P1-3）
     prompt = prompt[:_MAX_PROMPT_CHARS]
     if prompt:
         prompt = _PROMPT_WRAPPER + prompt
-    return {"system_prompt": prompt}
+    return {"system_prompt": prompt, "tools": tools}
 
 
 async def _sync_agent(agent_id: str, project_id: str) -> str:
@@ -281,6 +315,7 @@ async def _read_penguin_agent_defs() -> list[dict]:
                 "name": agent.get("name", aid),
                 "project_id": agent["project_id"],
                 "system_prompt": definition["system_prompt"],
+                "tools": definition["tools"],
             }
         )
     return out
@@ -298,12 +333,14 @@ def _write_subagents_config(team: list[dict]) -> tuple[list[str], bool]:
     for member in team:
         agent_id = re.sub(r"[^A-Za-z0-9_-]", "-", member["agent_id"])
         prompt = member["system_prompt"] or f"你是 {member['name']}。"
+        tools = member.get("tools") or list(_DEFAULT_TOOL_WHITELIST)
         desc = f"同步自 PenguinHarness Agent：{member['name']}".replace('"', "'")
         lines.append(f"    {agent_id}:")
         lines.append(f"      description: \"{desc}\"")
         lines.append("      system_prompt: |")
         lines.extend("        " + line for line in prompt.splitlines())
-        lines.append("      tools: null")
+        # 显式工具白名单（评审遗留：tools:null 会继承父代理全部工具，能力放大）
+        lines.append(f"      tools: [{', '.join(tools)}]")
         lines.append("      skills: null")
         lines.append("      model: inherit")
     block = "\n".join(lines) + "\n"

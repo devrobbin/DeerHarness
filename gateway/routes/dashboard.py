@@ -1,15 +1,14 @@
 """统一 Dashboard 路由：聚合统计 + 健康检查（Phase 3）。
 
 聚合来源：PenguinHarness（真实 API，经 penguin_client 带会话代理）、
-DeerFlow（执行框架）、网关本地存储（traces.json）。
+DeerFlow（执行框架）、网关本地 SQLite trace store。
 """
 
 from fastapi import APIRouter, HTTPException
 import httpx
-import json
-import os
 
 import config
+import trace_store
 from penguin_client import PenguinClient
 
 from .agents import _all_agents
@@ -20,16 +19,7 @@ router = APIRouter()
 DEERFLOW_API = config.DEERFLOW_API  # 统一配置（评审：消除硬编码端口）
 PENGUIN_API = config.PENGUIN_API
 
-TRACES_FILE = os.path.join(os.path.dirname(__file__), "..", "config", "traces.json")
-
 penguin = PenguinClient()
-
-
-def _load_traces() -> list[dict]:
-    if os.path.exists(TRACES_FILE):
-        with open(TRACES_FILE, "r") as f:
-            return json.load(f)
-    return []
 
 
 async def _check_penguin() -> dict:
@@ -61,10 +51,10 @@ async def _check_deerflow() -> dict:
 
 @router.get("/summary")
 async def dashboard_summary():
-    """聚合统计：Agent 数（真实）/ 任务数 / 成本。"""
-    traces = _load_traces()
+    """聚合统计：Agent 数（真实）/ 任务数 / 成本（SQLite）。"""
+    traces = trace_store.list_traces(limit=100000)
 
-    tasks = [t for t in traces if t.get("task_id")]
+    tasks = [t for t in traces if t.get("task_goal")]
     success = sum(1 for t in tasks if t.get("status") == "success")
     failed = sum(1 for t in tasks if t.get("status") == "failed")
     total_cost = round(sum(float(t.get("cost") or 0) for t in traces), 4)

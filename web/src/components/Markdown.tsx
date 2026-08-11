@@ -22,7 +22,7 @@ function CodeBlock({ language, children }: { language: string; children: string 
     <div className="my-2 overflow-hidden rounded-lg border border-gray-800">
       <div className="flex items-center justify-between bg-gray-800 px-3 py-1 text-[11px] text-gray-300">
         <span>{language}</span>
-        <button onClick={copy} className="hover:text-white">
+        <button onClick={copy} aria-label={copied ? '已复制' : '复制代码'} className="hover:text-white">
           {copied ? '✓ 已复制' : '复制'}
         </button>
       </div>
