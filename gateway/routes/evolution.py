@@ -32,6 +32,7 @@ from .fusion import (
     POLL_INTERVAL,
     _BUILTIN_BENCHMARKS,
     _extract_ai_reply,
+    _estimate_run_cost,
     _proxy_df,
     _read_penguin_agent_defs,
     _restart_deerflow_gateway,
@@ -146,10 +147,10 @@ async def _resolve_evolution_target(task: dict) -> tuple[str, list[dict], bool]:
     return runner, cases, True
 
 
-async def _run_team_case(deerflow_agent: str, statement: str) -> tuple[str, str]:
-    """团队模式评测：主代理 + 子代理真实执行（评估工作流模板/团队配置质量）。"""
+async def _run_team_case(deerflow_agent: str, statement: str) -> tuple[str, str, float]:
+    """团队模式评测：主代理 + 子代理真实执行，返回 (reply, status, cost)。"""
     if not statement:
-        return "(无题目内容)", "skipped"
+        return "(无题目内容)", "skipped", 0.0
     thread_id = f"dh-eval-{uuid.uuid4().hex[:12]}"
     try:
         await _proxy_df("POST", "/api/threads", json={"thread_id": thread_id})
@@ -170,18 +171,19 @@ async def _run_team_case(deerflow_agent: str, statement: str) -> tuple[str, str]
         run_id = run.get("run_id")
         deadline = time.monotonic() + 240
         status = run.get("status", "pending")
+        detail: dict = run
         while status in ("pending", "running", "queued"):
             if time.monotonic() > deadline:
-                return "(评测超时)", "timeout"
+                return "(评测超时)", "timeout", 0.0
             await asyncio.sleep(POLL_INTERVAL)
             detail = await _proxy_df("GET", f"/api/threads/{thread_id}/runs/{run_id}")
             status = detail.get("status", status)
         if status in ("failed", "error", "cancelled"):
-            return f"(run 状态: {status})", status
+            return f"(run 状态: {status})", status, 0.0
         state = await _proxy_df("GET", f"/api/threads/{thread_id}/state")
-        return _extract_ai_reply(state), status
+        return _extract_ai_reply(state), status, _estimate_run_cost(detail)
     except HTTPException as exc:
-        return f"(执行失败: {exc.detail})", "error"
+        return f"(执行失败: {exc.detail})", "error", 0.0
 
 
 # ==================== 改进方案 ====================
@@ -354,9 +356,9 @@ async def _advance_inner(task_id: str) -> None:
     results = []
     for case in cases:
         if team_mode:
-            reply, status = await _run_team_case(runner, case["statement"])
+            reply, status, case_cost = await _run_team_case(runner, case["statement"])
         else:
-            reply, status = await _run_case(runner, case["statement"])
+            reply, status, case_cost = await _run_case(runner, case["statement"])
         results.append({
             "id": case["id"],
             "title": case["title"],
@@ -364,13 +366,13 @@ async def _advance_inner(task_id: str) -> None:
             "reply": reply,
             "status": status,
         })
-        cost += _EST_CASE_COST
+        cost += case_cost
 
     # 2. 评分
     scored = await _score_replies([{k: r[k] for k in ("id", "title", "statement", "reply")} for r in results])
     avg = round(sum(c.get("score", 0) for c in scored) / max(1, len(scored)), 1)
     cost += _EST_SCORE_COST * len(scored)
-    store.update_task(task_id, cost=round(cost, 4), last_avg_score=avg)
+    store.update_task(task_id, cost=round(cost, 6), last_avg_score=avg)
     store.record_version(
         task_id, round_no, avg,
         f"第 {round_no} 轮评估（{len(scored)} 用例）",
@@ -380,10 +382,22 @@ async def _advance_inner(task_id: str) -> None:
         f"eval:{task_id}", "success",
         task_goal=f"进化[{task['target_type']}] 第{round_no}轮",
         score=avg, benchmark_id="evolution", version_baseline=round_no,
+        cost=round(cost, 6),
     )
     await _publish(task_id, "evolution_progress", {
         "current_round": round_no, "max_rounds": max_rounds, "avg_score": avg,
     })
+
+    # 2.5 验证轮：刚应用过改进（approve 标记 pending_verify）→ 本轮即验证，
+    #      评估后直接结束，不再生成/审批新方案（评审 P2-4：保证改进被评测）
+    try:
+        meta = json.loads(task.get("meta") or "{}")
+    except (json.JSONDecodeError, TypeError):
+        meta = {}
+    if meta.pop("pending_verify", False):
+        store.update_task(task_id, status="success", meta=json.dumps(meta, ensure_ascii=False))
+        await _publish(task_id, "evolution_done", {"status": "success", "reason": f"改进验证完成（第 {round_no} 轮，{avg} 分）"})
+        return
 
     # 3. 达标即止
     target_score = task["target_score"] or 85
@@ -536,7 +550,8 @@ async def evolution_approve(task_id: str, req: ApprovalRequest, user: User = Dep
         store.set_approval_status(req.approval_id, "pending")
         store.update_task(task_id, status="waiting_approval")
         raise
-    store.update_task(task_id, status="running")
+    # 应用后标记验证轮：下一轮评估改进效果后直接结束（评审 P2-4）
+    store.update_task(task_id, status="running", meta='{"pending_verify": true}')
     asyncio.create_task(_advance(task_id))
     return {"success": True}
 

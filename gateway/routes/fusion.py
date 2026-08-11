@@ -906,10 +906,20 @@ async def _fetch_case_statement(project_id: str, agent_id: str, benchmark_id: st
     return ""
 
 
-async def _run_case(deerflow_agent: str, statement: str) -> tuple[str, str]:
-    """DeerFlow 以 dh-<agent> 身份执行单个评测 case。"""
+def _estimate_run_cost(run_detail: dict) -> float:
+    """按 run 的真实 token 用量计价（USD）。"""
+    inp = float(run_detail.get("total_input_tokens") or 0)
+    out = float(run_detail.get("total_output_tokens") or 0)
+    return round(
+        inp / 1e6 * config.MODEL_INPUT_PRICE_PER_M + out / 1e6 * config.MODEL_OUTPUT_PRICE_PER_M,
+        6,
+    )
+
+
+async def _run_case(deerflow_agent: str, statement: str) -> tuple[str, str, float]:
+    """DeerFlow 以 dh-<agent> 身份执行单个评测 case，返回 (reply, status, cost)。"""
     if not statement:
-        return "(无题目内容)", "skipped"
+        return "(无题目内容)", "skipped", 0.0
     thread_id = f"dh-eval-{uuid.uuid4().hex[:12]}"
     try:
         await _proxy_df("POST", "/api/threads", json={"thread_id": thread_id})
@@ -926,18 +936,19 @@ async def _run_case(deerflow_agent: str, statement: str) -> tuple[str, str]:
         run_id = run.get("run_id")
         deadline = time.monotonic() + 180
         status = run.get("status", "pending")
+        detail: dict = run
         while status in ("pending", "running", "queued"):
             if time.monotonic() > deadline:
-                return "(评测超时)", "timeout"
+                return "(评测超时)", "timeout", 0.0
             await asyncio.sleep(POLL_INTERVAL)
             detail = await _proxy_df("GET", f"/api/threads/{thread_id}/runs/{run_id}")
             status = detail.get("status", status)
         if status in ("failed", "error", "cancelled"):
-            return f"(run 状态: {status})", status
+            return f"(run 状态: {status})", status, 0.0
         state = await _proxy_df("GET", f"/api/threads/{thread_id}/state")
-        return _extract_ai_reply(state), status
+        return _extract_ai_reply(state), status, _estimate_run_cost(detail)
     except HTTPException as exc:
-        return f"(执行失败: {exc.detail})", "error"
+        return f"(执行失败: {exc.detail})", "error", 0.0
 
 
 async def _score_replies(results: list[dict]) -> list[dict]:
@@ -1207,6 +1218,8 @@ async def fusion_team_run(req: FusionTeamRunRequest, user: User = Depends(requir
 
     thread_id = f"dh-team-{uuid.uuid4().hex[:12]}"
     try:
+        # 阻塞版也注册（评审 P2-2：超时/中断后用户可用 team/status 找回成员归因）
+        _register_team_run(thread_id, team)
         run_id = await _start_team_thread(thread_id, task, req.workflow, orchestrator)
 
         deadline = time.monotonic() + POLL_TIMEOUT

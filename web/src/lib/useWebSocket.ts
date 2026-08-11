@@ -22,8 +22,9 @@ export function useWebSocket(channel?: string) {
     const connect = () => {
       if (disposed) return;
       const token = getApiKey();
-      const url = `${GATEWAY_WS}/ws${channel ? `/${channel}` : ''}?token=${encodeURIComponent(token)}`;
-      const ws = new WebSocket(url);
+      // token 走 Sec-WebSocket-Protocol 子协议（不落访问日志，评审 P1-2）
+      const url = `${GATEWAY_WS}/ws${channel ? `/${channel}` : ''}`;
+      const ws = new WebSocket(url, [token]);
       wsRef.current = ws;
 
       ws.onopen = () => {

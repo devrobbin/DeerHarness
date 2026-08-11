@@ -82,6 +82,7 @@ export default function ChatPage() {
   const [copied, setCopied] = useState<string | null>(null);
   const [threads, setThreads] = useState<ThreadItem[]>([]);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const activeAbortRef = useRef<AbortController | null>(null);
 
   // 对话目标状态
   const [mode, setMode] = useState<ChatMode>('default');
@@ -136,6 +137,9 @@ export default function ChatPage() {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' });
   }, [messages, loading]);
 
+  // 卸载时中止在途 SSE 读流（评审 P2）
+  useEffect(() => () => { activeAbortRef.current?.abort(); }, []);
+
   // 加载历史会话列表（仅默认模式）
   useEffect(() => {
     if (mode !== 'default') return;
@@ -181,9 +185,9 @@ export default function ChatPage() {
     setTeamStatus({});
   };
 
-  /** 默认模式：SSE 流式（原逻辑） */
-  const sendDefault = async (text: string) => {
-    const res = await apiStream('/api/chat/stream', { message: text, thread_id: threadId });
+  /** 默认模式：SSE 流式（原逻辑）；AbortController 支持路由离开中止（评审 P2） */
+  const sendDefault = async (text: string, signal?: AbortSignal) => {
+    const res = await apiStream('/api/chat/stream', { message: text, thread_id: threadId }, signal);
     if (!res.ok) {
       const detail = await res.text();
       throw new Error(`HTTP ${res.status}: ${detail.slice(0, 120)}`);
@@ -302,10 +306,13 @@ export default function ChatPage() {
     setMessages(prev => [...prev, { role: 'user', content: text }]);
     setMessages(prev => [...prev, { role: 'assistant', content: '' }]);
     setLoading(true);
+    // AbortController：组件卸载时中止仍在进行的 SSE 读流（评审 P2）
+    const controller = new AbortController();
+    activeAbortRef.current = controller;
     try {
       if (mode === 'agent') await sendAgent(text);
       else if (mode === 'team') await sendTeam(text);
-      else await sendDefault(text);
+      else await sendDefault(text, controller.signal);
     } catch (err) {
       setMessages(prev => prev.slice(0, -1)); // 移除空回复气泡
       const msg = err instanceof Error ? err.message : String(err);
@@ -313,6 +320,7 @@ export default function ChatPage() {
       toast(msg, 'error');
     } finally {
       setLoading(false);
+      activeAbortRef.current = null;
     }
   };
 

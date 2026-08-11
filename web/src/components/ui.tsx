@@ -9,13 +9,6 @@ import React from 'react';
 
 // ---------- 设计 token ----------
 export const tokens = {
-  colors: {
-    brand: 'bg-blue-500 hover:bg-blue-600',
-    brandText: 'text-blue-600',
-    purple: 'bg-purple-500 hover:bg-purple-600',
-    danger: 'text-red-500 hover:text-red-700',
-  },
-  radius: 'rounded-lg',
   card: 'rounded-lg border border-gray-200 bg-white p-4 dark:border-gray-700 dark:bg-gray-800',
   input: 'w-full rounded border border-gray-300 p-2 text-sm dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100',
 };

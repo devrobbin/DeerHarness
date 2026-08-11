@@ -54,3 +54,8 @@ ADMIN_API_KEY = os.environ.get("ADMIN_API_KEY", "")
 MAX_COST_PER_REQUEST = float(os.environ.get("MAX_COST_PER_REQUEST", "2.0"))
 # 进化评测的评分模型 key（可选；未配置时评测只返回原始回复不评分）
 DEEPSEEK_API_KEY = os.environ.get("DEEPSEEK_API_KEY", "")
+
+# ---- 真实 token 计费（评审 P1-1：按 run 用量计价写入 traces.cost，替代估算） ----
+# USD / 1M tokens，可 env 覆盖
+MODEL_INPUT_PRICE_PER_M = float(os.environ.get("MODEL_INPUT_PRICE_PER_M", "0.27"))
+MODEL_OUTPUT_PRICE_PER_M = float(os.environ.get("MODEL_OUTPUT_PRICE_PER_M", "1.10"))

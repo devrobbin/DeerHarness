@@ -52,8 +52,14 @@ manager = ConnectionManager()
 
 
 async def _require_ws_auth(websocket: WebSocket) -> None:
-    """WS 握手鉴权：?token=<api_key>（安全评审 P0-1）。"""
-    token = websocket.query_params.get("token", "")
+    """WS 握手鉴权（评审 P1-2）：token 优先取 Sec-WebSocket-Protocol 子协议
+    （浏览器 protocols 参数，不落访问日志），回退 query string（兼容旧客户端）。"""
+    token = ""
+    protocols = websocket.headers.get("sec-websocket-protocol", "")
+    if protocols:
+        token = protocols.split(",")[0].strip()
+    if not token:
+        token = websocket.query_params.get("token", "")
     if not token or not verify_api_key(token):
         await websocket.close(code=4401, reason="unauthorized")
         raise WebSocketDisconnect(4401)

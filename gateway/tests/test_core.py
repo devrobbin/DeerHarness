@@ -380,7 +380,7 @@ class TestEvolutionEngine:
         async def fake_resolve(task):
             return "dh-orchestrator-amazon", [{"id": "c1", "title": "t", "statement": "s"}], True
         async def fake_run(a, s):
-            return "reply", "success"
+            return "reply", "success", 0.001
         async def fake_score(results):
             return [{"id": "c1", "title": "t", "score": score, "comment": "c", "reply": "r", "statement": "s"}]
         async def fake_propose(scored, task, blocked):
@@ -403,7 +403,7 @@ class TestEvolutionEngine:
         async def fake_resolve(task):
             return "orchestrator", [{"id": "c1", "title": "t", "statement": "s"}], True
         async def fake_run(a, s):
-            return "reply", "success"
+            return "reply", "success", 0.001
         async def fake_score(results):
             return [{"id": "c1", "title": "t", "score": 50, "comment": "c", "reply": "r", "statement": "s"}]
         async def fake_propose(scored, task, blocked):
@@ -448,7 +448,7 @@ class TestEvolutionEngine:
         async def fake_resolve(task):
             return "o", [{"id": "c1", "title": "t", "statement": "s"}], True
         async def fake_run(a, s):
-            return "reply", "success"
+            return "reply", "success", 0.001
         async def fake_score(results):
             return [{"id": "c1", "title": "t", "score": 90, "comment": "c", "reply": "r", "statement": "s"}]
         monkeypatch.setattr(evo, "_resolve_evolution_target", fake_resolve)

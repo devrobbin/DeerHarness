@@ -55,11 +55,12 @@ export async function apiDelete<T = any>(path: string): Promise<T> {
   return handle(res, path);
 }
 
-/** 带鉴权的流式请求（SSE 用） */
-export async function apiStream(path: string, body: unknown): Promise<Response> {
+/** 带鉴权的流式请求（SSE 用），支持 AbortSignal（评审 P2：路由离开中止读流） */
+export async function apiStream(path: string, body: unknown, signal?: AbortSignal): Promise<Response> {
   return fetch(`${GATEWAY}${path}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', ...authHeaders() },
     body: JSON.stringify(body),
+    signal,
   });
 }

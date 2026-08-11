@@ -198,7 +198,11 @@ export function EvolutionTaskPanel({ onTaskSelected, selectedTaskId }: Evolution
             <div
               key={t.task_id}
               onClick={() => onTaskSelected(t.task_id)}
-              className={`cursor-pointer rounded border p-2 text-xs transition ${
+              role="button"
+              tabIndex={0}
+              onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') onTaskSelected(t.task_id); }}
+              aria-pressed={selectedTaskId === t.task_id}
+              className={`cursor-pointer rounded border p-2 text-left text-xs transition ${
                 selectedTaskId === t.task_id
                   ? 'border-purple-400 bg-purple-50 dark:border-purple-600 dark:bg-purple-900/30'
                   : 'border-gray-100 hover:border-purple-200 dark:border-gray-700'
