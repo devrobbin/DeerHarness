@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { apiGet } from '@/lib/api';
+import { useI18n } from '@/lib/i18n';
 
 interface Summary {
   agents: number;
@@ -19,6 +20,7 @@ interface Health {
 }
 
 export default function DashboardPage() {
+  const { t } = useI18n();
   const [summary, setSummary] = useState<Summary | null>(null);
   const [health, setHealth] = useState<Health | null>(null);
 
@@ -40,7 +42,7 @@ export default function DashboardPage() {
 
   return (
     <div>
-      <h1 className="mb-6 text-2xl font-bold">📊 Dashboard</h1>
+      <h1 className="mb-6 text-2xl font-bold">{t.nav.dashboard}</h1>
 
       {/* 健康检查 */}
       <div className="mb-6 flex flex-wrap gap-3">

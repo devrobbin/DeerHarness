@@ -12,12 +12,12 @@ import React, { createContext, useCallback, useContext, useEffect, useState } fr
 const zhCN = {
   // 侧栏
   nav: {
-    dashboard: '📊 Dashboard',
-    chat: '💬 Chat',
-    studio: '🧪 Agent Studio',
-    evolution: '🧬 Evolution Lab',
-    monitor: '🛰️ Monitor',
-    settings: '🛠️ Settings',
+    dashboard: '📊 仪表盘',
+    chat: '💬 对话',
+    studio: '🧪 智能体工作室',
+    evolution: '🧬 进化实验室',
+    monitor: '🛰️ 监控',
+    settings: '🛠️ 设置',
   },
   apiKey: {
     label: '🔑 Gateway API Key',
@@ -34,7 +34,7 @@ const zhCN = {
   },
   // 设置页
   settings: {
-    title: '🛠️ Settings',
+    title: '🛠️ 设置',
     tabs: {
       models: '🧠 模型',
       skills: '🔧 技能',

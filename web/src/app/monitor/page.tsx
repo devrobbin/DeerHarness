@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { apiGet } from '@/lib/api';
+import { useI18n } from '@/lib/i18n';
 
 interface Trace {
   trace_id: string;
@@ -32,6 +33,7 @@ interface PenguinTrace {
 }
 
 export default function MonitorPage() {
+  const { t } = useI18n();
   const [traces, setTraces] = useState<Trace[]>([]);
   const [cost, setCost] = useState<CostSummary | null>(null);
   const [agents, setAgents] = useState<AgentItem[]>([]);
@@ -69,7 +71,7 @@ export default function MonitorPage() {
   return (
     <div>
       <div className="mb-6 flex items-center justify-between">
-        <h1 className="text-2xl font-bold">🛰️ Monitor</h1>
+        <h1 className="text-2xl font-bold">{t.nav.monitor}</h1>
         <button onClick={load} className="rounded bg-gray-800 px-4 py-2 text-sm text-white hover:bg-gray-700">
           刷新
         </button>

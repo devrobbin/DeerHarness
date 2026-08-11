@@ -6,6 +6,7 @@ import { apiGet, apiStream } from '@/lib/api';
 import { Markdown } from '@/components/Markdown';
 import { Button, Input } from '@/components/ui';
 import { useToast } from '@/components/Toast';
+import { useI18n } from '@/lib/i18n';
 
 interface ChatMessage {
   role: 'user' | 'assistant';
@@ -18,6 +19,7 @@ interface ThreadItem {
 }
 
 export default function ChatPage() {
+  const { t } = useI18n();
   const { connected } = useWebSocket();
   const { toast } = useToast();
   const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -140,7 +142,7 @@ export default function ChatPage() {
     <div className="flex h-[calc(100vh-6rem)] flex-col">
       <div className="mb-3 flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold">💬 Chat</h1>
+          <h1 className="text-2xl font-bold">{t.nav.chat}</h1>
           <p className="text-xs text-gray-400">
             经 Gateway 代理 DeerFlow · DeepSeek-V4-Flash 模型 · 流式输出
             {threadId && <span className="ml-2 font-mono">· thread {threadId.slice(0, 12)}</span>}
