@@ -306,7 +306,8 @@ class FusionTeamRunRequest(BaseModel):
 
 
 # ==================== 团队模板 ====================
-# 预设主代理人设 + 编排指引，即"组合版本"的团队工作模式。
+# 预设主代理人设 + 编排指引。soul 含 {team_members} 占位符——
+# 运行时会动态注入真实团队成员清单（评审遗留：不再硬编码成员名）。
 TEAM_TEMPLATES: dict[str, dict] = {
     "crossborder-ops": {
         "name": "dh-orchestrator",
@@ -318,10 +319,8 @@ TEAM_TEMPLATES: dict[str, dict] = {
 2. 通过 task 工具把子任务分派给最合适的团队成员（子代理），可并行推进；
 3. 汇总各成员结果，输出完整、可执行、面向跨境电商运营场景的结论（选品/定价/内容/物流/财税）。
 
-团队成员：
-- default_agent：通用执行 Agent（搜索、分析、报告）
-- agent：代码/工单助手（开发、数据、流程自动化）
-- summarizer：摘要专家（长文提炼、要点归纳）
+当前团队成员（按需分派）：
+{team_members}
 
 风格：简洁、专业、结果导向。""",
     },
@@ -424,6 +423,33 @@ def _restart_deerflow_gateway() -> None:
             status_code=500,
             detail=f"重启 deer-flow 失败: {exc.stderr.decode(errors='ignore')[:200]}",
         )
+    # 等待容器就绪（修复：重启窗口期请求 502）
+    _wait_deerflow_ready()
+
+
+def _wait_deerflow_ready(timeout_s: float = 60.0) -> None:
+    """轮询 deer-flow 登录直到成功，避免 restart 窗口期 502。"""
+    import httpx as _httpx
+
+    deadline = time.monotonic() + timeout_s
+    while time.monotonic() < deadline:
+        try:
+            resp = _httpx.post(
+                f"{config.DEERFLOW_API}/api/v1/auth/login/local",
+                data={
+                    "username": config.DEERFLOW_EMAIL,
+                    "password": config.DEERFLOW_PASSWORD,
+                    "remember_me": "true",
+                },
+                timeout=5.0,
+                trust_env=False,
+            )
+            if resp.status_code == 200:
+                return
+        except Exception:
+            pass
+        time.sleep(2)
+    raise HTTPException(status_code=503, detail="deer-flow 重启后未就绪")
 
 
 @router.post("/team/sync")
@@ -441,16 +467,34 @@ async def fusion_team_sync(req: Optional[FusionTeamSyncRequest] = None):
     return {"success": True, "team": synced, "config": DEERFLOW_CONFIG, "restarted": changed}
 
 
-async def _sync_orchestrator(template: str) -> str:
-    """同步模板主代理为 DeerFlow Custom Agent（幂等），返回 agent 名。"""
+def _member_desc(member: dict) -> str:
+    """提取成员的一行职责描述（跳过同步包装层与结构标记行）。"""
+    prompt = member.get("system_prompt") or ""
+    for line in prompt.splitlines():
+        line = line.strip()
+        if not line or line.startswith(("#", "以下职责说明", "其中提及")):
+            continue
+        return line[:60]
+    return member.get("name") or member.get("agent_id", "")
+
+
+async def _sync_orchestrator(template: str, team_members: list[dict]) -> str:
+    """同步模板主代理为 DeerFlow Custom Agent（幂等）。
+
+    soul 动态注入真实团队成员清单（id：角色 — 职责），替代硬编码成员名。
+    """
     spec = TEAM_TEMPLATES.get(template)
     if not spec:
         raise HTTPException(status_code=404, detail=f"未知团队模板: {template}")
+    members_text = "\n".join(
+        f"- {m['agent_id']}：{m['name']} — {_member_desc(m)}" for m in team_members
+    )
+    soul = spec["soul"].format(team_members=members_text)
     name = spec["name"]
     agents = await _proxy_df("GET", "/api/agents")
     exists = any(a.get("name") == name for a in agents.get("agents", []))
     if exists:
-        await _proxy_df("PUT", f"/api/agents/{name}", json={"soul": spec["soul"]})
+        await _proxy_df("PUT", f"/api/agents/{name}", json={"soul": soul})
     else:
         await _proxy_df(
             "POST",
@@ -459,7 +503,7 @@ async def _sync_orchestrator(template: str) -> str:
                 "name": name,
                 "description": spec["description"],
                 "model": DEFAULT_MODEL,
-                "soul": spec["soul"],
+                "soul": soul,
             },
         )
     return name
@@ -699,10 +743,10 @@ async def fusion_team_run(req: FusionTeamRunRequest):
         # 仅配置变化才重启（评审 B：避免每次请求杀并发 run）
         _restart_deerflow_gateway()
 
-    # 模板主代理（可选）
+    # 模板主代理（可选）：soul 注入真实团队清单
     orchestrator = None
     if req.template:
-        orchestrator = await _sync_orchestrator(req.template)
+        orchestrator = await _sync_orchestrator(req.template, team)
 
     thread_id = f"dh-team-{uuid.uuid4().hex[:12]}"
     try:
