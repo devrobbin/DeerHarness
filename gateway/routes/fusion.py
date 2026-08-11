@@ -33,6 +33,7 @@ import config
 from deerflow_client import DeerFlowClient, DeerFlowError
 from penguin_client import PenguinClient
 from validate import valid_id
+import evolution_store
 from .traces import record_trace
 
 
@@ -680,6 +681,12 @@ async def fusion_team_sync(req: Optional[FusionTeamSyncRequest] = None):
         team = [m for m in team if m["agent_id"] == req.agent_id]
         if not team:
             raise HTTPException(status_code=404, detail="Agent 不存在")
+    if template:
+        for m in team:
+            effective = evolution_store.get_effective_member_prompt(m["agent_id"], m["system_prompt"], template)
+            if effective != m["system_prompt"]:
+                m["system_prompt"] = effective
+
     synced, changed = _write_subagents_config(team)
     if changed:
         _restart_deerflow_gateway()
@@ -708,7 +715,7 @@ async def _sync_orchestrator(template: str, team_members: list[dict]) -> str:
     members_text = "\n".join(
         f"- {m['agent_id']}：{m['name']} — {_member_desc(m)}" for m in team_members
     )
-    soul = spec["soul"].format(team_members=members_text)
+    soul = evolution_store.get_effective_soul(template, spec["soul"]).format(team_members=members_text)
     name = spec["name"]
     agents = await _proxy_df("GET", "/api/agents")
     exists = any(a.get("name") == name for a in agents.get("agents", []))
@@ -738,7 +745,10 @@ async def fusion_team_templates():
                 "icon": spec.get("icon", "🧭"),
                 "description": spec["description"],
                 "members": spec.get("members"),  # None = 全部 Agent
-                "workflows": spec.get("workflows", []),
+                "workflows": [
+                    {**w, "task": evolution_store.get_effective_workflow_task(key, w["id"], w["task"])}
+                    for w in spec.get("workflows", [])
+                ],
             }
             for key, spec in TEAM_TEMPLATES.items()
         ]
@@ -752,7 +762,7 @@ def _resolve_workflow_task(template: str | None, workflow_id: str | None, task: 
     spec = TEAM_TEMPLATES.get(template) or {}
     for wf in spec.get("workflows", []):
         if wf["id"] == workflow_id:
-            return wf["task"]
+            return evolution_store.get_effective_workflow_task(template, workflow_id, wf["task"])
     return task
 
 

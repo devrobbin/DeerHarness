@@ -248,3 +248,47 @@ class TestVaultTranslation:
         ])
         out = [{"key": e.key, "value": e.value} if e.value is not None else {"key": e.key} for e in req.entries]
         assert out == [{"key": "API_KEY", "value": "sk-123"}, {"key": "KEEP_ME"}]
+
+
+class TestEvolutionStore:
+    """进化存储层：覆盖配置 / 审批 / 任务版本。"""
+
+    def test_override_roundtrip(self, tmp_path, monkeypatch):
+        import evolution_store as es
+        monkeypatch.setattr(es, "DB_FILE", str(tmp_path / "evo.db"))
+        es.init_db()
+        v1 = es.set_override("amazon-ops", "ad-review", "workflow_task", "", "新任务模板A")
+        assert v1 == 1
+        v2 = es.set_override("amazon-ops", "ad-review", "workflow_task", "", "新任务模板B")
+        assert v2 == 2  # 版本递增
+        assert es.get_override("amazon-ops", "ad-review", "workflow_task") == "新任务模板B"
+        # 回退基础模板
+        assert es.get_effective_workflow_task("amazon-ops", "other-wf", "基础任务") == "基础任务"
+        assert es.get_effective_workflow_task("amazon-ops", "ad-review", "基础任务") == "新任务模板B"
+        # soul / member_prompt
+        es.set_override("amazon-ops", None, "soul", "", "新soul")
+        assert es.get_effective_soul("amazon-ops", "基础soul") == "新soul"
+        es.set_override("amazon-ops", None, "member_prompt", "ad_optimizer", "广告优化专家新提示")
+        assert es.get_effective_member_prompt("ad_optimizer", "旧提示", "amazon-ops") == "广告优化专家新提示"
+        assert es.get_effective_member_prompt("listing_seo", "旧提示", "amazon-ops") == "旧提示"
+
+    def test_approval_flow(self, tmp_path, monkeypatch):
+        import evolution_store as es
+        monkeypatch.setattr(es, "DB_FILE", str(tmp_path / "evo.db"))
+        es.init_db()
+        task_id = "evolve-test-1"
+        es.create_task(task_id, "workflow", team_id="amazon-ops", workflow_id="ad-review")
+        aid = es.add_approval(task_id, 1, {"target": "workflow_task", "new_text": "改进", "reason": "r"})
+        assert len(es.list_approvals(task_id)) == 1
+        assert es.set_approval_status(aid, "approved")
+        assert not es.set_approval_status(aid, "approved")  # 二次处理失败
+        assert len(es.list_approvals(task_id)) == 0  # pending 已空
+        # 版本记录
+        es.record_version(task_id, 1, 72.5, "基线", {"cases": []})
+        es.record_version(task_id, 2, 85.0, "改进后", {"cases": []})
+        vs = es.list_versions(task_id)
+        assert [v["score"] for v in vs] == [72.5, 85.0]
+        # 任务状态流转
+        es.update_task(task_id, status="waiting_approval", current_round=1)
+        t = es.get_task(task_id)
+        assert t["status"] == "waiting_approval" and t["current_round"] == 1
