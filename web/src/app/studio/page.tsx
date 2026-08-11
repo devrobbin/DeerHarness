@@ -16,13 +16,14 @@ export default function StudioPage() {
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
         <AgentList />
         <AgentBuilder />
-        {/* 团队编排占满两列：编排过程 + 汇总需要大展示区 */}
+        <AgentChat />
+        <AgentTraceViewer />
+        <div /> {/* 占位：成本面板保持在右列底部 */}
+        <AgentCostPanel />
+        {/* 团队编排全宽置底：不挤压其他面板 */}
         <div className="lg:col-span-2">
           <TeamOrchestrator />
         </div>
-        <AgentChat />
-        <AgentTraceViewer />
-        <AgentCostPanel />
       </div>
     </div>
   );
