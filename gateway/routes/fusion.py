@@ -77,6 +77,38 @@ _PENGUIN_TOOL_MAP = {
 # penguin 无工具声明时的保守白名单（只读 + 搜索，不含 bash 执行）
 _DEFAULT_TOOL_WHITELIST = ["web_search", "read_file", "write_file", "glob", "grep"]
 
+# 内置评测集：纯文本任务，无需前置文件（example-benchmark 需要 workspace 文件）
+_BUILTIN_BENCHMARKS: dict[str, list[dict]] = {
+    "dh-benchmark": [
+        {
+            "id": "DH-001-summary",
+            "title": "信息摘要",
+            "statement": (
+                "请用不超过 3 句话总结下面这段文字的核心内容：\n"
+                "「DeerHarness 是一个融合 PenguinHarness 与 DeerFlow 的 AI Agent 平台。"
+                "PenguinHarness 负责低成本构建和自进化 Agent，DeerFlow 提供长链路多智能体"
+                "执行运行时。平台通过统一网关管理 Agent、进化、轨迹与成本。」"
+            ),
+        },
+        {
+            "id": "DH-002-format",
+            "title": "Markdown 格式遵循",
+            "statement": (
+                "请输出一个 Markdown 二级标题「核心要点」，下面跟 3 个无序列表项，"
+                "每项一句话。不要输出其他内容。"
+            ),
+        },
+        {
+            "id": "DH-003-json",
+            "title": "结构化 JSON 输出",
+            "statement": (
+                "以 JSON 格式输出一个包含 name、version、tools 三个字段的对象，"
+                "其中 tools 是字符串数组（至少 2 项）。只输出 JSON，不要额外文字。"
+            ),
+        },
+    ],
+}
+
 
 def _map_penguin_tools(tool_names: list[str]) -> list[str]:
     """penguin 工具名 → deer-flow 工具白名单（去重、保持顺序、跳过未知）。"""
@@ -515,7 +547,10 @@ async def fusion_evaluate(req: FusionEvaluateRequest):
 
 
 async def _fetch_benchmark_cases(project_id: str, agent_id: str, benchmark_id: str, max_cases: int) -> list[dict]:
-    """从 penguin 拉取 benchmark cases（题目文本）。"""
+    """拉取评测 cases：优先内置评测集（dh-benchmark），否则走 penguin。"""
+    builtin = _BUILTIN_BENCHMARKS.get(benchmark_id)
+    if builtin is not None:
+        return [{"id": c["id"], "title": c["title"], "statement": c["statement"]} for c in builtin[:max_cases]]
     base = f"/api/projects/{project_id}/agents/{agent_id}/benchmarks/{benchmark_id}/cases"
     try:
         resp = await penguin.request("GET", base)
@@ -614,6 +649,16 @@ async def _score_replies(results: list[dict]) -> list[dict]:
             trust_env=False,
         )
         content = resp.json()["choices"][0]["message"]["content"]
+        content = content.strip()
+        # 剥离可能的 ```json 代码块包裹
+        if content.startswith("```"):
+            parts = content.split("```")
+            content = parts[1] if len(parts) > 1 else content
+            content = content.strip()
+        # 提取 JSON 数组子串（模型可能夹杂说明文字）
+        start, end = content.find("["), content.rfind("]")
+        if start != -1 and end > start:
+            content = content[start:end + 1]
         scores = json.loads(content)
     except Exception:
         scores = []
