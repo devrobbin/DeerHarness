@@ -240,8 +240,8 @@ export function TeamOrchestrator() {
         </button>
       </div>
 
-      {/* 结果区 */}
-      <div ref={scrollRef} className="mt-3 max-h-80 space-y-2 overflow-y-auto">
+      {/* 结果区：大屏展示编排过程与最终汇总（原 max-h-80 放大到 30rem） */}
+      <div ref={scrollRef} className="mt-3 max-h-[30rem] space-y-2 overflow-y-auto">
         {loading && (
           <div className="rounded bg-purple-50 p-3 text-sm text-purple-600 dark:bg-purple-900/30 dark:text-purple-300">
             <span className="inline-flex items-center gap-1.5">
@@ -267,8 +267,8 @@ export function TeamOrchestrator() {
                   {result.delegations.map((d, i) => (
                     <div key={i} className="rounded bg-white p-2 text-xs text-gray-600 dark:bg-gray-800 dark:text-gray-300">
                       <span className="font-mono text-purple-500 dark:text-purple-400">task #{i + 1}</span>{' '}
-                      <span className="whitespace-pre-wrap">{d.result.slice(0, 220)}</span>
-                      {d.result.length > 220 && <span>…</span>}
+                      <span className="whitespace-pre-wrap">{d.result.slice(0, 400)}</span>
+                      {d.result.length > 400 && <span>…</span>}
                     </div>
                   ))}
                 </div>
