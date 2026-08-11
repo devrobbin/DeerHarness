@@ -118,3 +118,51 @@ class TestExtractDelegations:
 
     def test_none(self):
         assert _extract_delegations({"values": {"messages": []}}) == []
+
+
+class TestTeamProgress:
+    """团队成员工作状态解析（idle/working/done/failed 归属）。"""
+
+    TEAM = [
+        {"agent_id": "ad_optimizer", "name": "广告优化Agent", "system_prompt": "x"},
+        {"agent_id": "inventory_forecast", "name": "库存预测Agent", "system_prompt": "x"},
+    ]
+
+    def test_attribute_member(self):
+        from routes.fusion import _attribute_member
+        assert _attribute_member("你是 Amazon 广告优化专家", self.TEAM) == "ad_optimizer"
+        assert _attribute_member("预测库存与补货", self.TEAM) == "inventory_forecast"
+        assert _attribute_member("无关内容", self.TEAM) is None
+
+    def test_working_then_done(self):
+        from routes.fusion import _parse_team_progress
+        # 分派中：AI tool_call 已发出，tool 结果未回 → working
+        state = {"values": {"messages": [
+            {"type": "ai", "tool_calls": [{"id": "c1", "name": "task",
+                                           "args": {"description": "广告复盘", "prompt": "广告优化"}}]},
+        ]}}
+        out = _parse_team_progress(state, self.TEAM)
+        by_id = {m["agent_id"]: m["state"] for m in out["members"]}
+        assert by_id["ad_optimizer"] == "working"
+        assert by_id["inventory_forecast"] == "idle"
+
+        # 完成后：tool 消息带回 subagent_status=completed → done
+        state["values"]["messages"].append(
+            {"type": "tool", "name": "task", "tool_call_id": "c1",
+             "additional_kwargs": {"subagent_status": "completed"}, "status": "success"}
+        )
+        out = _parse_team_progress(state, self.TEAM)
+        by_id = {m["agent_id"]: m["state"] for m in out["members"]}
+        assert by_id["ad_optimizer"] == "done"
+
+    def test_failed(self):
+        from routes.fusion import _parse_team_progress
+        state = {"values": {"messages": [
+            {"type": "ai", "tool_calls": [{"id": "c1", "name": "task",
+                                           "args": {"prompt": "库存补货建议"}}]},
+            {"type": "tool", "name": "task", "tool_call_id": "c1",
+             "additional_kwargs": {"subagent_status": "failed"}, "status": "error"},
+        ]}}
+        out = _parse_team_progress(state, self.TEAM)
+        by_id = {m["agent_id"]: m["state"] for m in out["members"]}
+        assert by_id["inventory_forecast"] == "failed"

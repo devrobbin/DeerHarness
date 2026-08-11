@@ -34,7 +34,25 @@ interface TeamTemplate {
   name: string;
   icon: string;
   description: string;
+  members: string[] | null; // null = 全部 Agent
   workflows: Workflow[];
+}
+
+interface MemberStatus {
+  agent_id: string;
+  state: 'idle' | 'working' | 'done' | 'failed';
+  task_count: number;
+}
+
+interface TeamStatus {
+  thread_id: string;
+  status: string;
+  members: MemberStatus[];
+  delegations_total: number;
+  other: { started: number; done: number; failed: number };
+  terminal: boolean;
+  reply?: string;
+  delegations?: { tool: string; result: string }[];
 }
 
 /** 对话目标：默认 DeerFlow / 单个 penguin Agent / 团队（模板+工作流） */
@@ -73,6 +91,19 @@ export default function ChatPage() {
   const [template, setTemplate] = useState('');
   const [workflow, setWorkflow] = useState('');
   const [agentSessions, setAgentSessions] = useState<Record<string, string>>({});
+
+  // 团队模式：成员实时工作状态（轮询 /api/fusion/team/status）
+  const [teamStatus, setTeamStatus] = useState<Record<string, MemberStatus>>({});
+  const [teamMembers, setTeamMembers] = useState<AgentItem[]>([]);
+  const pollRef = useRef<number | null>(null);
+
+  const stopPolling = () => {
+    if (pollRef.current !== null) {
+      window.clearTimeout(pollRef.current);
+      pollRef.current = null;
+    }
+  };
+  useEffect(() => stopPolling, []);
 
   // 新消息自动滚到底部
   useEffect(() => {
@@ -117,9 +148,11 @@ export default function ChatPage() {
   };
 
   const newChat = () => {
+    stopPolling();
     setMessages([]);
     setThreadId(undefined);
     setError('');
+    setTeamStatus({});
   };
 
   /** 默认模式：SSE 流式（原逻辑） */
@@ -180,19 +213,52 @@ export default function ChatPage() {
     setMessages(prev => [...prev.slice(0, -1), { role: 'assistant', content: data.reply }]);
   };
 
-  /** 团队模式：模板 + 工作流，主代理编排分派 */
+  /** 团队模式：/team/start 立即返回 → 轮询 /team/status 实时展示成员工作状态 */
   const sendTeam = async (text: string) => {
-    const data = await apiPost<{
-      reply: string;
-      status: string;
-      team: string[];
-      delegations: { tool: string; result: string }[];
-    }>('/api/fusion/team/run', {
+    // 确定本次团队班底（模板成员或全部），初始化状态栏
+    const memberIds = activeTemplate?.members
+      ? activeTemplate.members
+      : agents.map(a => a.agentId);
+    const members = agents.filter(a => memberIds.includes(a.agentId));
+    setTeamMembers(members);
+    setTeamStatus(Object.fromEntries(members.map(m => [m.agentId, { agent_id: m.agentId, state: 'idle', task_count: 0 }])));
+
+    const start = await apiPost<{ thread_id: string; team: string[] }>('/api/fusion/team/start', {
       task: text,
       template: template || undefined,
       workflow: workflow || undefined,
     });
-    setMessages(prev => [...prev.slice(0, -1), { role: 'assistant', content: data.reply, delegations: data.delegations }]);
+
+    let attempts = 0;
+    const MAX_ATTEMPTS = 100; // 100 × 3s ≈ 5 分钟
+
+    const poll = async () => {
+      if (attempts++ > MAX_ATTEMPTS) {
+        setMessages(prev => prev.slice(0, -1));
+        setError('团队任务超时（约 5 分钟），请稍后重试');
+        setLoading(false);
+        return;
+      }
+      try {
+        const d = await apiGet<TeamStatus>(`/api/fusion/team/status/${start.thread_id}`);
+        // 合并最新成员状态（terminal 后注册表清理 → 保留最后一次快照）
+        if (d.members.length > 0) {
+          setTeamStatus(prev => ({ ...prev, ...Object.fromEntries(d.members.map(m => [m.agent_id, m])) }));
+        }
+        if (!d.terminal) {
+          pollRef.current = window.setTimeout(poll, 3000);
+          return;
+        }
+        setLoading(false);
+        const reply = d.reply || '（团队任务已结束，未返回汇总内容）';
+        setMessages(prev => [...prev.slice(0, -1), { role: 'assistant', content: reply, delegations: d.delegations ?? [] }]);
+      } catch (err) {
+        setLoading(false);
+        setMessages(prev => prev.slice(0, -1));
+        setError(`进度查询失败：${err instanceof Error ? err.message : err}`);
+      }
+    };
+    poll();
   };
 
   /** 统一发送：按目标模式分支 */
@@ -404,6 +470,38 @@ export default function ChatPage() {
         ))}
         {error && <p role="alert" className="text-center text-sm text-red-500">{error}</p>}
       </div>
+
+      {/* 团队模式：已启用成员实时工作状态（工作中转圈） */}
+      {mode === 'team' && teamMembers.length > 0 && (
+        <div className="mt-2 mb-1 flex flex-wrap items-center gap-1.5 text-xs">
+          <span className="text-gray-400 dark:text-gray-500">👥 已启用成员（{teamMembers.length}）</span>
+          {teamMembers.map(m => {
+            const st = teamStatus[m.agentId]?.state ?? 'idle';
+            const badge =
+              st === 'working'
+                ? 'bg-purple-50 text-purple-600 dark:bg-purple-900/30 dark:text-purple-300'
+                : st === 'done'
+                  ? 'bg-green-50 text-green-600 dark:bg-green-900/30 dark:text-green-400'
+                  : st === 'failed'
+                    ? 'bg-red-50 text-red-500 dark:bg-red-900/30 dark:text-red-400'
+                    : 'bg-gray-100 text-gray-500 dark:bg-gray-700 dark:text-gray-400';
+            return (
+              <span key={m.agentId} className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 ${badge}`}>
+                {st === 'working' ? (
+                  <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-purple-500 border-t-transparent" />
+                ) : st === 'done' ? (
+                  '✅'
+                ) : st === 'failed' ? (
+                  '❌'
+                ) : (
+                  '⏳'
+                )}
+                {m.name}
+              </span>
+            );
+          })}
+        </div>
+      )}
 
       <div className="mt-4 flex gap-2">
         <Input

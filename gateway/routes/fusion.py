@@ -960,34 +960,44 @@ async def _score_replies(results: list[dict]) -> list[dict]:
     return out
 
 
-@router.post("/team/run")
-async def fusion_team_run(req: FusionTeamRunRequest):
-    """团队编排：主代理（DeerFlow）按需把子任务分派给团队成员（penguin Agent）。
+# 进行中的团队 run 注册表：thread_id → {team, started_at}（status 轮询需要成员清单）
+_TEAM_RUNS: dict[str, dict] = {}
+_TEAM_RUN_TTL = 1800.0  # 30 分钟过期清理
 
-    - 自动同步团队配置并重启使生效（首次调用）
-    - 指定 template 时：
-      * 以该团队的主代理身份编排（不同团队 = 不同编排人设）
-      * 成员自动限定为该团队的班底（不同团队 = 不同成员组成）
-    - 指定 workflow 时：任务为空则套用同团队的内置工作流预设
-    - 返回最终回复 + 编排过程（task 分派记录）
+
+def _register_team_run(thread_id: str, team: list[dict]) -> None:
+    """登记进行中的团队 run（含成员清单），同时清理过期条目。"""
+    now = time.monotonic()
+    stale = [k for k, v in _TEAM_RUNS.items() if now - v["started_at"] > _TEAM_RUN_TTL]
+    for k in stale:
+        _TEAM_RUNS.pop(k, None)
+    _TEAM_RUNS[thread_id] = {"team": team, "started_at": now}
+
+
+async def _prepare_team(
+    template: str | None, agent_ids: list[str] | None, task: str, workflow: str | None
+) -> tuple[list[dict], str | None, str, list[str]]:
+    """团队编排公共准备：成员过滤 + 配置同步 + 主代理同步。
+
+    返回 (team, orchestrator, task, synced)。
     """
     team = await _read_penguin_agent_defs()
 
     # 模板成员限定：不同团队 = 不同班底（先按模板过滤，再按 agent_ids 收窄）
-    if req.template:
-        spec = TEAM_TEMPLATES.get(req.template) or {}
+    if template:
+        spec = TEAM_TEMPLATES.get(template) or {}
         allowed = spec.get("members")
         if allowed is not None:
             team = [m for m in team if m["agent_id"] in allowed]
         if not team:
-            raise HTTPException(status_code=404, detail=f"团队模板 {req.template} 无可用成员")
+            raise HTTPException(status_code=404, detail=f"团队模板 {template} 无可用成员")
 
-    if req.agent_ids:
-        team = [m for m in team if m["agent_id"] in req.agent_ids]
+    if agent_ids:
+        team = [m for m in team if m["agent_id"] in agent_ids]
     if not team:
         raise HTTPException(status_code=404, detail="团队为空：请先在 penguin 创建 Agent")
 
-    task = _resolve_workflow_task(req.template, req.workflow, req.task)
+    task = _resolve_workflow_task(template, workflow, task)
     if not task.strip():
         raise HTTPException(status_code=400, detail="任务内容为空")
 
@@ -998,28 +1008,151 @@ async def fusion_team_run(req: FusionTeamRunRequest):
 
     # 模板主代理（可选）：soul 注入真实团队清单
     orchestrator = None
-    if req.template:
-        orchestrator = await _sync_orchestrator(req.template, team)
+    if template:
+        orchestrator = await _sync_orchestrator(template, team)
+
+    return team, orchestrator, task, synced
+
+
+async def _start_team_thread(
+    thread_id: str, task: str, workflow: str | None, orchestrator: str | None
+) -> str:
+    """创建线程并启动 run，返回 run_id（不阻塞等待完成）。"""
+    await _proxy_df("POST", "/api/threads", json={"thread_id": thread_id})
+    run_body: dict = {
+        "input": {"messages": [{"role": "user", "content": task}], "workflow_id": workflow or ""},
+        "config": {"recursion_limit": 2000},
+        "context": {
+            "model_name": DEFAULT_MODEL,
+            "mode": "ultra",
+            "subagent_enabled": True,
+        },
+    }
+    if orchestrator:
+        run_body["assistant_id"] = orchestrator
+    run = await _proxy_df("POST", f"/api/threads/{thread_id}/runs", json=run_body)
+    return run.get("run_id")
+
+
+def _member_keywords(member: dict) -> list[str]:
+    """成员关键词（用于把 task 分派归属到具体成员）。
+
+    英文取 agent_id 分词；中文名加双字切分（"库存预测" → 库存/存预/预测），
+    提升"预测库存与补货"这类换序表达的命中率。
+    """
+    keywords = set()
+    for tok in member["agent_id"].replace("-", "_").split("_"):
+        if len(tok) >= 2:
+            keywords.add(tok.lower())
+    name = (member.get("name") or "").replace("Agent", "").replace("agent", "").strip()
+    if len(name) >= 2:
+        keywords.add(name.lower())
+    if any("\u4e00" <= ch <= "\u9fff" for ch in name):
+        for i in range(len(name) - 1):
+            keywords.add(name[i : i + 2].lower())
+    return [k for k in keywords]
+
+
+def _attribute_member(prompt: str, team: list[dict]) -> Optional[str]:
+    """关键词打分：把 task 分派 prompt 归属到最匹配的成员（无法确定时返回 None）。"""
+    best, best_score = None, 0
+    text = (prompt or "").lower()
+    for m in team:
+        score = sum(1 for k in _member_keywords(m) if k in text)
+        if score > best_score:
+            best, best_score = m["agent_id"], score
+    return best if best_score > 0 else None
+
+
+def _parse_team_progress(state: dict, team: list[dict]) -> dict:
+    """从线程状态解析各成员工作状态（idle/working/done/failed）。
+
+    - AI 消息的 task tool_call → 该成员"工作中"（启动）
+    - 对应的 tool 消息（subagent_status=completed）→ "已完成"
+    - 无法归属的分派计入 other_* 计数（汇总展示用）
+    """
+    messages = (state.get("values") or {}).get("messages") or []
+    started: dict[str, Optional[str]] = {}      # tool_call_id → member
+    done_count: dict[str, int] = {}
+    failed_count: dict[str, int] = {}
+    other_started = other_done = other_failed = 0
+
+    for m in messages:
+        role = m.get("type") or m.get("role")
+        if role == "ai":
+            for tc in m.get("tool_calls") or []:
+                if tc.get("name") == "task":
+                    args = tc.get("args") or {}
+                    prompt = f"{args.get('description', '')} {args.get('prompt', '')}"
+                    started[tc.get("id")] = _attribute_member(prompt, team)
+        elif role == "tool" and m.get("name") == "task":
+            tcid = m.get("tool_call_id")
+            member = started.get(tcid)
+            sub_status = (m.get("additional_kwargs") or {}).get("subagent_status") or m.get("status")
+            is_failed = sub_status in ("failed", "error") or m.get("status") in ("error", "failed")
+            if member:
+                (failed_count if is_failed else done_count)[member] = (
+                    (failed_count if is_failed else done_count).get(member, 0) + 1
+                )
+            else:
+                if is_failed:
+                    other_failed += 1
+                else:
+                    other_done += 1
+
+    # 启动但未完成 → 工作中
+    completed_tcids = {
+        m.get("tool_call_id")
+        for m in messages
+        if (m.get("type") or m.get("role")) == "tool" and m.get("name") == "task"
+    }
+    working_count: dict[str, int] = {}
+    for tcid, member in started.items():
+        if tcid in completed_tcids:
+            continue
+        if member:
+            working_count[member] = working_count.get(member, 0) + 1
+        else:
+            other_started += 1
+
+    members = []
+    for m in team:
+        aid = m["agent_id"]
+        if failed_count.get(aid):
+            members.append({"agent_id": aid, "state": "failed", "task_count": failed_count[aid]})
+        elif done_count.get(aid):
+            members.append({"agent_id": aid, "state": "done", "task_count": done_count[aid]})
+        elif working_count.get(aid):
+            members.append({"agent_id": aid, "state": "working", "task_count": working_count[aid]})
+        else:
+            members.append({"agent_id": aid, "state": "idle", "task_count": 0})
+
+    return {
+        "members": members,
+        "delegations_total": len(completed_tcids),
+        "other": {"started": other_started, "done": other_done, "failed": other_failed},
+    }
+
+
+@router.post("/team/run")
+async def fusion_team_run(req: FusionTeamRunRequest):
+    """团队编排（阻塞版）：主代理（DeerFlow）按需把子任务分派给团队成员（penguin Agent）。
+
+    - 自动同步团队配置并重启使生效（首次调用）
+    - 指定 template 时：以该团队的主代理身份编排 + 成员限定为该团队的班底
+    - 指定 workflow 时：任务为空则套用同团队的内置工作流预设
+    - 返回最终回复 + 编排过程（task 分派记录）
+    """
+    team, orchestrator, task, synced = await _prepare_team(
+        req.template, req.agent_ids, req.task, req.workflow
+    )
 
     thread_id = f"dh-team-{uuid.uuid4().hex[:12]}"
     try:
-        await _proxy_df("POST", "/api/threads", json={"thread_id": thread_id})
-        run_body: dict = {
-            "input": {"messages": [{"role": "user", "content": task}], "workflow_id": req.workflow or ""},
-            "config": {"recursion_limit": 2000},
-            "context": {
-                "model_name": DEFAULT_MODEL,
-                "mode": "ultra",
-                "subagent_enabled": True,
-            },
-        }
-        if orchestrator:
-            run_body["assistant_id"] = orchestrator
-        run = await _proxy_df("POST", f"/api/threads/{thread_id}/runs", json=run_body)
-        run_id = run.get("run_id")
+        run_id = await _start_team_thread(thread_id, task, req.workflow, orchestrator)
 
         deadline = time.monotonic() + POLL_TIMEOUT
-        status = run.get("status", "pending")
+        status = "pending"
         while status in ("pending", "running", "queued"):
             if time.monotonic() > deadline:
                 raise HTTPException(status_code=504, detail="团队任务超时")
@@ -1060,6 +1193,81 @@ async def fusion_team_run(req: FusionTeamRunRequest):
         raise
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"团队编排失败: {exc}")
+
+
+class FusionTeamStartRequest(BaseModel):
+    task: str
+    agent_ids: Optional[list[str]] = None
+    template: Optional[str] = None
+    workflow: Optional[str] = None
+
+
+@router.post("/team/start")
+async def fusion_team_start(req: FusionTeamStartRequest):
+    """团队编排（非阻塞版）：立即返回 thread_id，前端轮询 /team/status 展示实时进度。
+
+    与 team/run 共享同一套准备逻辑（成员过滤 + 配置同步 + 主代理同步）。
+    """
+    team, orchestrator, task, synced = await _prepare_team(
+        req.template, req.agent_ids, req.task, req.workflow
+    )
+    thread_id = f"dh-team-{uuid.uuid4().hex[:12]}"
+    try:
+        run_id = await _start_team_thread(thread_id, task, req.workflow, orchestrator)
+        _register_team_run(thread_id, team)  # status 轮询需要成员清单
+        return {
+            "success": True,
+            "thread_id": thread_id,
+            "run_id": run_id,
+            "team": synced,
+            "template": req.template,
+        }
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"团队编排启动失败: {exc}")
+
+
+@router.get("/team/status/{thread_id}")
+async def fusion_team_status(thread_id: str):
+    """轮询团队 run 进度：各成员工作状态 + 分派统计（运行中 / 已结束）。"""
+    thread_id = valid_id(thread_id, "thread_id")
+    try:
+        runs = await _proxy_df("GET", f"/api/threads/{thread_id}/runs")
+        run_list = (
+            runs.get("runs")
+            if isinstance(runs, dict)
+            else (runs if isinstance(runs, list) else [])
+        )
+        run = run_list[-1] if run_list else {}
+        status = run.get("status", "unknown")
+        run_id = run.get("run_id")
+
+        # 成员清单：来自 /team/start 时的注册表（fallback 空团队 = 仅返回分派统计）
+        run_info = _TEAM_RUNS.get(thread_id) or {}
+        team = run_info.get("team") or []
+
+        state = await _proxy_df("GET", f"/api/threads/{thread_id}/state")
+        progress = _parse_team_progress(state, team)
+
+        is_terminal = status not in ("pending", "running", "queued", "unknown")
+        result = {
+            "thread_id": thread_id,
+            "status": status,
+            "members": progress["members"],
+            "delegations_total": progress["delegations_total"],
+            "other": progress["other"],
+            "terminal": is_terminal,
+        }
+        if is_terminal:
+            result["reply"] = _extract_ai_reply(state)
+            result["delegations"] = _extract_delegations(state)
+            _TEAM_RUNS.pop(thread_id, None)  # 结束后清理注册
+        return result
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"团队进度查询失败: {exc}")
 
 
 def _extract_delegations(state: dict) -> list[dict]:
