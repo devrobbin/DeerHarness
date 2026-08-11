@@ -4,6 +4,8 @@ import { useEffect, useRef, useState } from 'react';
 import { useWebSocket } from '@/lib/useWebSocket';
 import { apiGet, apiStream } from '@/lib/api';
 import { Markdown } from '@/components/Markdown';
+import { Button, Input } from '@/components/ui';
+import { useToast } from '@/components/Toast';
 
 interface ChatMessage {
   role: 'user' | 'assistant';
@@ -17,6 +19,7 @@ interface ThreadItem {
 
 export default function ChatPage() {
   const { connected } = useWebSocket();
+  const { toast } = useToast();
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
   const [threadId, setThreadId] = useState<string | undefined>();
@@ -93,7 +96,9 @@ export default function ChatPage() {
       }
     } catch (err) {
       setMessages(prev => prev.slice(0, -1)); // 移除空回复气泡
-      setError(`调用失败：${err instanceof Error ? err.message : err}`);
+      const msg = err instanceof Error ? err.message : String(err);
+      setError(msg);
+      toast(msg, 'error');
     } finally {
       setLoading(false);
     }
@@ -206,21 +211,17 @@ export default function ChatPage() {
       </div>
 
       <div className="mt-4 flex gap-2">
-        <input
+        <Input
           value={input}
           onChange={e => setInput(e.target.value)}
           onKeyDown={e => e.key === 'Enter' && !e.shiftKey && handleSend()}
           placeholder="输入消息，回车发送（支持 Markdown，流式输出）"
           disabled={loading}
-          className="flex-1 rounded border border-gray-300 p-2 text-sm disabled:opacity-50"
+          className="flex-1 disabled:opacity-50"
         />
-        <button
-          onClick={handleSend}
-          disabled={loading || !input.trim()}
-          className="rounded bg-blue-500 px-5 py-2 text-sm text-white hover:bg-blue-600 disabled:opacity-50"
-        >
+        <Button onClick={handleSend} disabled={loading || !input.trim()}>
           {loading ? '生成中…' : '发送'}
-        </button>
+        </Button>
       </div>
     </div>
   );

@@ -52,3 +52,5 @@ CORS_ORIGINS = [
 ADMIN_API_KEY = os.environ.get("ADMIN_API_KEY", "")
 # 请求级 LLM 预算（美元）：超限拒绝新对话（安全评审 P1-5）
 MAX_COST_PER_REQUEST = float(os.environ.get("MAX_COST_PER_REQUEST", "2.0"))
+# 进化评测的评分模型 key（可选；未配置时评测只返回原始回复不评分）
+DEEPSEEK_API_KEY = os.environ.get("DEEPSEEK_API_KEY", "")

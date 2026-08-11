@@ -1,12 +1,21 @@
 from contextlib import asynccontextmanager
+import logging
 
 from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import PlainTextResponse
 
 import config
 from auth import bootstrap_admin, get_current_user
+from observability import RequestLogMiddleware, metrics_text
 from routes import agents, chat, evolution, traces, dashboard, cost, settings, users, fusion
 from ws import router as ws_router
+
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s [%(name)s] %(message)s",
+)
 
 
 @asynccontextmanager
@@ -26,6 +35,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="DeerHarness Gateway", version="0.7.0", lifespan=lifespan)
 
+app.add_middleware(RequestLogMiddleware)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=config.CORS_ORIGINS,
@@ -58,3 +68,9 @@ app.include_router(ws_router, tags=["websocket"])
 @app.get("/api/health")
 async def health():
     return {"status": "ok", "service": "deerharness-gateway", "version": "0.7.0"}
+
+
+@app.get("/metrics", response_class=PlainTextResponse)
+async def metrics():
+    """Prometheus 文本格式指标（可观测性评审遗留）。"""
+    return metrics_text()

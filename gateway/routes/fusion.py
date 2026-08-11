@@ -444,6 +444,197 @@ async def fusion_team_templates():
     }
 
 
+class FusionEvaluateRequest(BaseModel):
+    agent_id: str
+    project_id: Optional[str] = None
+    benchmark_id: str = "example-benchmark"
+    max_cases: int = 3  # 评测用例数（成本控制）
+
+
+@router.post("/evaluate")
+async def fusion_evaluate(req: FusionEvaluateRequest):
+    """进化闭环：执行轨迹 → 评测打分（评审遗留的闭环前半程）。
+
+    流程：
+    1. 同步 Agent 到 DeerFlow（记录版本基线 updatedAt）
+    2. 从 penguin 拉取 benchmark cases（题目文本）
+    3. 用 DeerFlow 运行时逐 case 执行（assistant_id = dh-<agent>）
+    4. LLM 批量评分（0-100 + 点评，需配置 DEEPSEEK_API_KEY）
+    5. 评测结果写入 traces（agent_id=eval:<agent>），支持版本间对比
+    """
+    req.agent_id = valid_id(req.agent_id, "agent_id")
+    req.benchmark_id = valid_id(req.benchmark_id, "benchmark_id")
+    project_id = valid_id(req.project_id or "default_project", "project_id")
+
+    # 1. 同步（幂等），版本基线用 penguin 侧的 version（deer-flow agents API 无 updatedAt）
+    deerflow_agent = await _sync_agent(req.agent_id, project_id)
+    from .agents import _all_agents as _list_agents
+
+    penguin_agents = await _list_agents()
+    version_baseline = next(
+        (str(a.get("version", "")) for a in penguin_agents if a.get("agentId") == req.agent_id),
+        "",
+    )
+
+    # 2. 拉取 benchmark cases
+    cases = await _fetch_benchmark_cases(project_id, req.agent_id, req.benchmark_id, req.max_cases)
+    if not cases:
+        raise HTTPException(
+            status_code=404,
+            detail="该 Agent 未配置 benchmark 或没有可用 cases（default_agent 内置 example-benchmark）",
+        )
+
+    # 3. 逐 case 用 DeerFlow 执行
+    results = []
+    for case in cases:
+        reply, status = await _run_case(deerflow_agent, case["statement"])
+        results.append({**case, "reply": reply, "run_status": status})
+
+    # 4. LLM 批量评分
+    scored = await _score_replies(results)
+
+    avg = round(sum(s["score"] for s in scored) / len(scored), 1) if scored else 0.0
+    report = {
+        "agent_id": req.agent_id,
+        "deerflow_agent": deerflow_agent,
+        "benchmark_id": req.benchmark_id,
+        "version_baseline": version_baseline,
+        "average_score": avg,
+        "cases": scored,
+    }
+    # 5. 记录评测轨迹（可对比连续两次评测的分数变化）
+    record_trace(
+        f"eval:{req.agent_id}",
+        "success",
+        task_goal=f"benchmark {req.benchmark_id} ({len(scored)} cases)",
+        score=avg,
+        benchmark_id=req.benchmark_id,
+        version_baseline=version_baseline,
+    )
+    return report
+
+
+async def _fetch_benchmark_cases(project_id: str, agent_id: str, benchmark_id: str, max_cases: int) -> list[dict]:
+    """从 penguin 拉取 benchmark cases（题目文本）。"""
+    base = f"/api/projects/{project_id}/agents/{agent_id}/benchmarks/{benchmark_id}/cases"
+    try:
+        resp = await penguin.request("GET", base)
+    except httpx.ConnectError:
+        raise HTTPException(status_code=502, detail="PenguinHarness 服务不可达")
+    if resp.status_code >= 400:
+        raise HTTPException(status_code=resp.status_code, detail=resp.text)
+    data = resp.json()
+    out = []
+    for case in (data.get("cases") or [])[:max_cases]:
+        case_id = case.get("id", "")
+        statement = await _fetch_case_statement(project_id, agent_id, benchmark_id, case_id)
+        out.append({"id": case_id, "title": case.get("title", case_id), "statement": statement})
+    return out
+
+
+async def _fetch_case_statement(project_id: str, agent_id: str, benchmark_id: str, case_id: str) -> str:
+    """拉取单个 case 的 statement（markdown 任务说明）。"""
+    base = f"/api/projects/{project_id}/agents/{agent_id}/benchmarks/{benchmark_id}/cases/{case_id}"
+    try:
+        files = await penguin.request("GET", base + "/files")
+        entries = (files.json().get("entries") or []) if files.status_code == 200 else []
+        if not entries:
+            return ""
+        name = entries[0].get("name", "")
+        resp = await penguin.request("GET", base + "/files/content", params={"path": name})
+        if resp.status_code == 200:
+            return resp.text[:2000]
+    except (httpx.ConnectError, httpx.TimeoutException):
+        pass
+    return ""
+
+
+async def _run_case(deerflow_agent: str, statement: str) -> tuple[str, str]:
+    """DeerFlow 以 dh-<agent> 身份执行单个评测 case。"""
+    if not statement:
+        return "(无题目内容)", "skipped"
+    thread_id = f"dh-eval-{uuid.uuid4().hex[:12]}"
+    try:
+        await _proxy_df("POST", "/api/threads", json={"thread_id": thread_id})
+        run = await _proxy_df(
+            "POST",
+            f"/api/threads/{thread_id}/runs",
+            json={
+                "assistant_id": deerflow_agent,
+                "input": {"messages": [{"role": "user", "content": statement}]},
+                "config": {"recursion_limit": 1000},
+                "context": {"model_name": DEFAULT_MODEL, "mode": "flash", "thinking_enabled": False},
+            },
+        )
+        run_id = run.get("run_id")
+        deadline = time.monotonic() + 180
+        status = run.get("status", "pending")
+        while status in ("pending", "running", "queued"):
+            if time.monotonic() > deadline:
+                return "(评测超时)", "timeout"
+            await asyncio.sleep(POLL_INTERVAL)
+            detail = await _proxy_df("GET", f"/api/threads/{thread_id}/runs/{run_id}")
+            status = detail.get("status", status)
+        if status in ("failed", "error", "cancelled"):
+            return f"(run 状态: {status})", status
+        state = await _proxy_df("GET", f"/api/threads/{thread_id}/state")
+        return _extract_ai_reply(state), status
+    except HTTPException as exc:
+        return f"(执行失败: {exc.detail})", "error"
+
+
+async def _score_replies(results: list[dict]) -> list[dict]:
+    """LLM 批量评分（0-100 + 点评）。需要 config.DEEPSEEK_API_KEY。"""
+    if not config.DEEPSEEK_API_KEY:
+        return [
+            {
+                **r,
+                "score": 0,
+                "comment": "未配置 DEEPSEEK_API_KEY，跳过 LLM 评分（仅返回执行结果）",
+            }
+            for r in results
+        ]
+    prompt = (
+        "你是严格的 Agent 评测员。对下面每个评测 case，根据任务完成度给 Agent 回复打分（0-100 整数），"
+        "并给一句简短点评。只输出 JSON 数组：[{\"id\":\"<case id>\",\"score\":<0-100>,\"comment\":\"<点评>\"}]。\n\n"
+    )
+    for r in results:
+        prompt += f"## Case {r['id']}（{r['title']}）\n题目：{r['statement'][:500]}\nAgent 回复：{r['reply'][:800]}\n\n"
+    try:
+        resp = httpx.post(
+            "https://api.deepseek.com/chat/completions",
+            headers={"Authorization": f"Bearer {config.DEEPSEEK_API_KEY}"},
+            json={
+                "model": "deepseek-v4-flash",
+                "messages": [{"role": "user", "content": prompt}],
+                "temperature": 0.2,
+                "max_tokens": 1500,
+            },
+            timeout=60,
+            trust_env=False,
+        )
+        content = resp.json()["choices"][0]["message"]["content"]
+        scores = json.loads(content)
+    except Exception:
+        scores = []
+    score_map = {s.get("id"): s for s in scores if isinstance(s, dict)}
+    out = []
+    for r in results:
+        s = score_map.get(r["id"], {})
+        try:
+            score = max(0, min(100, int(s.get("score", 0))))
+        except (TypeError, ValueError):
+            score = 0
+        out.append({
+            "id": r["id"],
+            "title": r["title"],
+            "score": score,
+            "comment": str(s.get("comment", "") or "")[:200],
+            "reply": r["reply"][:300],
+        })
+    return out
+
+
 @router.post("/team/run")
 async def fusion_team_run(req: FusionTeamRunRequest):
     """团队编排：主代理（DeerFlow）按需把子任务分派给团队成员（penguin Agent）。
