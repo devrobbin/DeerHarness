@@ -58,18 +58,6 @@ interface TeamStatus {
 /** 对话目标：默认 DeerFlow / 单个 penguin Agent / 团队（模板+工作流） */
 type ChatMode = 'default' | 'agent' | 'team';
 
-const MODE_LABELS: Record<ChatMode, string> = {
-  default: '💬 默认对话',
-  agent: '🤖 Agent 对话',
-  team: '🧭 团队对话',
-};
-
-const LOADING_TEXT: Record<ChatMode, string> = {
-  default: '生成中…',
-  agent: 'Agent 思考中…',
-  team: '团队编排中…',
-};
-
 export default function ChatPage() {
   const { t } = useI18n();
   const { connected } = useWebSocket();
@@ -378,21 +366,21 @@ export default function ChatPage() {
         <div>
           <h1 className="text-2xl font-bold">{t.nav.chat}</h1>
           <p className="text-xs text-gray-400">
-            {mode === 'default' && '经 Gateway 代理 DeerFlow · 流式输出'}
-            {mode === 'agent' && '与 penguin Agent 直接对话 · 会话延续'}
-            {mode === 'team' && '主代理拆解任务 → 分派子代理 → 汇总（模板 + 工作流）'}
+            {mode === 'default' && t.chatMode.defaultSub}
+            {mode === 'agent' && t.chatMode.agentSub}
+            {mode === 'team' && t.chatMode.teamSub}
             {threadId && <span className="ml-2 font-mono">· thread {threadId.slice(0, 12)}</span>}
           </p>
         </div>
         <span className={`flex items-center gap-1 text-sm ${connected ? 'text-green-500' : 'text-red-400'}`}>
           <span className={`w-2 h-2 rounded-full ${connected ? 'bg-green-500 animate-pulse' : 'bg-red-400'}`} />
-          {connected ? 'Gateway 已连接' : 'Gateway 未连接'}
+          {connected ? t.chatMode.connected : t.chatMode.disconnected}
         </span>
       </div>
 
       {/* 对话目标选择：默认 / Agent / 团队（+工作流） */}
       <div className="mb-3 flex flex-wrap items-center gap-2">
-        {(Object.keys(MODE_LABELS) as ChatMode[]).map(m => (
+        {(['default','agent','team'] as ChatMode[]).map(m => (
           <button
             key={m}
             onClick={() => switchMode(m)}
@@ -402,7 +390,7 @@ export default function ChatPage() {
                 : 'bg-gray-100 text-gray-500 hover:bg-gray-200 dark:bg-gray-700 dark:text-gray-300'
             }`}
           >
-            {MODE_LABELS[m]}
+            {t.chatMode[m]}
           </button>
         ))}
 
@@ -456,7 +444,7 @@ export default function ChatPage() {
               onChange={e => e.target.value && loadThread(e.target.value)}
               className="rounded border border-gray-300 p-1.5 text-xs text-gray-600 dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100"
             >
-              <option value="">📚 历史会话…</option>
+              <option value="">{t.chatMode.history}</option>
               {threads.slice(0, 20).map(t => (
                 <option key={t.thread_id} value={t.thread_id}>
                   {t.thread_id.slice(0, 18)} · {t.updated_at?.slice(0, 10) ?? ''}
@@ -467,7 +455,7 @@ export default function ChatPage() {
               onClick={newChat}
               className="rounded border border-gray-300 px-3 py-1.5 text-xs text-gray-600 hover:bg-gray-100 dark:border-gray-600 dark:text-gray-300"
             >
-              ✨ 新对话
+              {t.chatMode.newChat}
             </button>
           </>
         )}
@@ -476,7 +464,7 @@ export default function ChatPage() {
       <div ref={scrollRef} className="flex-1 overflow-y-auto space-y-3 rounded-lg border border-gray-200 bg-white p-4 dark:border-gray-700 dark:bg-gray-800">
         {messages.length === 0 && !loading && (
           <p className="py-10 text-center text-gray-400">
-            {mode === 'default' && '向 DeerFlow 提问吧（支持 Markdown 渲染与流式输出）…'}
+            {mode === 'default' && t.chatMode.defaultEmpty}
             {mode === 'agent' && `选择上方 Agent（当前：${targetLabel}）后开始对话…`}
             {mode === 'team' && `选择团队与工作流（当前：${targetLabel}），下达任务后主代理将拆解分派…`}
           </p>
@@ -527,7 +515,7 @@ export default function ChatPage() {
       {/* 团队模式：已启用成员实时工作状态（工作中转圈；点击成员查看其会话内容） */}
       {mode === 'team' && teamMembers.length > 0 && (
         <div className="mt-2 mb-1 flex flex-wrap items-center gap-1.5 text-xs">
-          <span className="text-gray-400 dark:text-gray-500">👥 已启用成员（{teamMembers.length}）</span>
+          <span className="text-gray-400 dark:text-gray-500">{t.chatMode.members(teamMembers.length)}</span>
           {teamMembers.map(m => {
             const st = teamStatus[m.agentId]?.state ?? 'idle';
             const badge =
@@ -568,16 +556,16 @@ export default function ChatPage() {
           onKeyDown={e => e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing && handleSend()}
           placeholder={
             mode === 'default'
-              ? '输入消息，回车发送（支持 Markdown，流式输出）'
+              ? t.chatMode.defaultPlaceholder
               : mode === 'agent'
-                ? `向「${targetLabel}」提问，回车发送…`
-                : `下达任务给「${targetLabel}」，回车后主代理将拆解并分派…`
+                ? t.chatMode.agentPlaceholder(targetLabel)
+                : t.chatMode.teamPlaceholder(targetLabel)
           }
           disabled={loading}
           className="flex-1 disabled:opacity-50"
         />
         <Button onClick={handleSend} disabled={loading || !input.trim()}>
-          {loading ? LOADING_TEXT[mode] : '发送'}
+          {loading ? t.chatMode[`${mode}Loading` as 'defaultLoading'] : t.chatMode.send}
         </Button>
       </div>
 

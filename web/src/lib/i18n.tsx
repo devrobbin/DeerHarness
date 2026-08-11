@@ -10,6 +10,28 @@ import React, { createContext, useCallback, useContext, useEffect, useState } fr
  */
 
 const zhCN = {
+  // 对话页
+  chatMode: {
+    default: '💬 默认对话',
+    agent: '🤖 Agent 对话',
+    team: '🧭 团队对话',
+    defaultSub: '经 Gateway 代理 DeerFlow · 流式输出',
+    agentSub: '与 penguin Agent 直接对话 · 会话延续',
+    teamSub: '主代理拆解任务 → 分派子代理 → 汇总（模板 + 工作流）',
+    defaultLoading: '生成中…',
+    agentLoading: 'Agent 思考中…',
+    teamLoading: '团队编排中…',
+    defaultPlaceholder: '输入消息，回车发送（支持 Markdown，流式输出）',
+    agentPlaceholder: (name: string) => `向「${name}」提问，回车发送…`,
+    teamPlaceholder: (name: string) => `下达任务给「${name}」，回车后主代理将拆解并分派…`,
+    defaultEmpty: '向 DeerFlow 提问吧（支持 Markdown 渲染与流式输出）…',
+    send: '发送',
+    history: '📚 历史会话…',
+    newChat: '✨ 新对话',
+    members: (n: number) => `👥 已启用成员（${n}）`,
+    connected: 'Gateway 已连接',
+    disconnected: 'Gateway 未连接',
+  },
   // 侧栏
   nav: {
     dashboard: '📊 仪表盘',
@@ -203,6 +225,27 @@ const zhCN = {
 export type I18nDict = typeof zhCN;
 
 const enUS: I18nDict = {
+  chatMode: {
+    default: '💬 Default chat',
+    agent: '🤖 Agent chat',
+    team: '🧭 Team chat',
+    defaultSub: 'Via Gateway proxied DeerFlow · streaming',
+    agentSub: 'Chat directly with a penguin agent · session continues',
+    teamSub: 'Orchestrator splits → delegates → summarizes (template + workflow)',
+    defaultLoading: 'Generating…',
+    agentLoading: 'Agent thinking…',
+    teamLoading: 'Orchestrating…',
+    defaultPlaceholder: 'Type a message, Enter to send (Markdown, streaming)',
+    agentPlaceholder: (name: string) => `Ask "${name}"…`,
+    teamPlaceholder: (name: string) => `Assign task to "${name}" — the orchestrator will split and delegate…`,
+    defaultEmpty: 'Ask DeerFlow (Markdown + streaming)…',
+    send: 'Send',
+    history: '📚 History…',
+    newChat: '✨ New chat',
+    members: (n: number) => `👥 Enabled members (${n})`,
+    connected: 'Gateway connected',
+    disconnected: 'Gateway offline',
+  },
   nav: {
     dashboard: '📊 Dashboard',
     chat: '💬 Chat',
@@ -421,6 +464,45 @@ export function LanguageProvider({ children }: { children: React.ReactNode }) {
   );
 }
 
+/**
+ * 运行时缺键回退（评审 P2-8：注释与实现此前不符）。
+ * 返回的 dict 在 en-US 下访问缺失键时回退 zh-CN，并在 dev 输出告警。
+ * 通过 Proxy 拦截任意深度的属性访问。
+ */
+function withRuntimeFallback(dict: I18nDict, lang: Lang): I18nDict {
+  if (lang === 'zh-CN') return dict;
+  const zh = DICTS['zh-CN'];
+
+  const makeProxy = (target: Record<string, unknown>, zhTarget: Record<string, unknown>, path: string): any =>
+    new Proxy(target as any, {
+      get(obj, key) {
+        const k = String(key);
+        if (key in obj) {
+          const v = obj[k];
+          if (v && typeof v === 'object') {
+            return makeProxy(v as any, (zhTarget[k] ?? {}) as any, `${path}.${k}`);
+          }
+          return v;
+        }
+        // 缺键：回退 zh-CN
+        const fallback = (zhTarget as any)[k];
+        if (typeof fallback === 'function') return fallback;
+        if (process.env.NODE_ENV !== 'production') {
+          // eslint-disable-next-line no-console
+          console.warn(`[i18n] en-US 缺键: ${path}.${k}（回退中文）`);
+        }
+        if (fallback && typeof fallback === 'object') {
+          return makeProxy(fallback as any, {}, `${path}.${k}`);
+        }
+        return fallback ?? '';
+      },
+    });
+
+  return makeProxy(dict, zh, 't');
+}
+
 export function useI18n(): I18nContextValue {
-  return useContext(I18nContext);
+  const ctx = useContext(I18nContext);
+  // en 模式下应用运行时缺键回退
+  return { ...ctx, t: withRuntimeFallback(ctx.t, ctx.lang) };
 }
