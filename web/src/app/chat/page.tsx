@@ -544,7 +544,7 @@ export default function ChatPage() {
         <Input
           value={input}
           onChange={e => setInput(e.target.value)}
-          onKeyDown={e => e.key === 'Enter' && !e.shiftKey && handleSend()}
+          onKeyDown={e => e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing && handleSend()}
           placeholder={
             mode === 'default'
               ? '输入消息，回车发送（支持 Markdown，流式输出）'

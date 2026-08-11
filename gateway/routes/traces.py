@@ -60,7 +60,7 @@ def _publish_global(record: dict):
 @router.post("")
 async def ingest_trace(event: TraceEvent, user: User = Depends(require_developer)):
     """DeerFlow 执行完成后回调上报轨迹。"""
-    record = trace_store.record_trace(
+    record = record_trace(
         event.agent_id,
         event.status,
         task_goal=event.task_goal,

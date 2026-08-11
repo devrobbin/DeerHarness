@@ -217,37 +217,31 @@ class TestModelPref:
 
 
 class TestSessionBody:
-    """chat 会话创建 body 组装（模型偏好注入）。"""
-
-    def _body(self, pref):
-        body = {}
-        if pref and pref.get("provider") and pref.get("model_id"):
-            body["provider"] = pref["provider"]
-            body["modelId"] = pref["model_id"]
-        return body
+    """chat 会话创建 body 组装（模型偏好注入）—— 直测生产函数 build_session_create_body。"""
 
     def test_with_pref(self, monkeypatch):
         import agent_prefs
+        from routes.agents import build_session_create_body
         monkeypatch.setattr(agent_prefs, "get_model_pref", lambda aid: {"provider": "deepseek", "model_id": "deepseek-chat"})
-        assert self._body(agent_prefs.get_model_pref("x")) == {"provider": "deepseek", "modelId": "deepseek-chat"}
+        assert build_session_create_body("x") == {"provider": "deepseek", "modelId": "deepseek-chat"}
 
     def test_without_pref(self, monkeypatch):
         import agent_prefs
+        from routes.agents import build_session_create_body
         monkeypatch.setattr(agent_prefs, "get_model_pref", lambda aid: None)
-        assert self._body(agent_prefs.get_model_pref("x")) == {}
+        assert build_session_create_body("x") == {}
 
 
 class TestVaultTranslation:
-    """Vault 更新翻译（None value = 保留现有值）。"""
+    """Vault 更新翻译（None value = 保留现有值）—— 直测生产函数 vault_entries_payload。"""
 
     def test_translate(self):
-        from routes.agents import VaultEntry, VaultUpdateRequest
+        from routes.agents import VaultEntry, VaultUpdateRequest, vault_entries_payload
         req = VaultUpdateRequest(entries=[
             VaultEntry(key="API_KEY", value="sk-123"),
             VaultEntry(key="KEEP_ME", value=None),
         ])
-        out = [{"key": e.key, "value": e.value} if e.value is not None else {"key": e.key} for e in req.entries]
-        assert out == [{"key": "API_KEY", "value": "sk-123"}, {"key": "KEEP_ME"}]
+        assert vault_entries_payload(req.entries) == [{"key": "API_KEY", "value": "sk-123"}, {"key": "KEEP_ME"}]
 
 
 class TestEvolutionStore:

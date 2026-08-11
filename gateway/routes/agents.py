@@ -306,7 +306,7 @@ async def get_agent_vault(agent_id: str):
 async def update_agent_vault(agent_id: str, req: VaultUpdateRequest, user: User = Depends(require_developer)):
     """整表替换 Vault（与 penguin 契约一致）。"""
     project_id = await _find_agent_project(agent_id)
-    entries = [{"key": e.key, "value": e.value} if e.value is not None else {"key": e.key} for e in req.entries]
+    entries = vault_entries_payload(req.entries)
     return await _proxy(
         "PUT",
         f"/api/projects/{project_id}/agents/{agent_id}/vault",
@@ -321,6 +321,21 @@ async def delete_agent(agent_id: str, project_id: str, user: User = Depends(requ
     project_id = valid_id(project_id, "project_id")
     await _proxy("DELETE", f"/api/projects/{project_id}/agents/{agent_id}")
     return {"success": True}
+
+
+def build_session_create_body(agent_id: str) -> dict:
+    """会话创建 body：携带每 Agent 模型偏好（provider+modelId，成对）。"""
+    body: dict = {}
+    pref = agent_prefs.get_model_pref(agent_id)
+    if pref and pref.get("provider") and pref.get("model_id"):
+        body["provider"] = pref["provider"]
+        body["modelId"] = pref["model_id"]
+    return body
+
+
+def vault_entries_payload(entries: list["VaultEntry"]) -> list[dict]:
+    """Vault 整表替换 payload：None value = 保留现有值。"""
+    return [{"key": e.key, "value": e.value} if e.value is not None else {"key": e.key} for e in entries]
 
 
 class AgentChatRequest(BaseModel):
@@ -343,11 +358,7 @@ async def chat_with_agent(agent_id: str, req: AgentChatRequest, user: User = Dep
         # 1. 会话：复用或新建（新建时携带每 Agent 模型偏好 → penguin 会话级选择）
         session_id = req.session_id
         if not session_id:
-            session_body: dict = {}
-            pref = agent_prefs.get_model_pref(agent_id)
-            if pref and pref.get("provider") and pref.get("model_id"):
-                session_body["provider"] = pref["provider"]
-                session_body["modelId"] = pref["model_id"]
+            session_body = build_session_create_body(agent_id)
             created = await _proxy(
                 "POST", f"/api/projects/{project_id}/agents/{agent_id}/sessions",
                 json=session_body,

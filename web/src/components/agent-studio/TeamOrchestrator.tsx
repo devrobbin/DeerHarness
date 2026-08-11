@@ -222,7 +222,7 @@ export function TeamOrchestrator() {
         <input
           value={task}
           onChange={e => setTask(e.target.value)}
-          onKeyDown={e => e.key === 'Enter' && handleRun()}
+          onKeyDown={e => e.key === 'Enter' && !e.nativeEvent.isComposing && handleRun()}
           placeholder={
             activeTemplate
               ? `选择工作流自动填充，或直接下达团队任务（${activeTemplate.description.split('：')[0]} 将拆解分派）`

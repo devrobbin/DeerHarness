@@ -51,19 +51,8 @@ async def _check_deerflow() -> dict:
 
 @router.get("/summary")
 async def dashboard_summary():
-    """聚合统计：Agent / 任务 / 成本 / 团队编排 / 进化 / 趋势（SQLite）。"""
-    traces = trace_store.list_traces(limit=100000)
-
-    tasks = [t for t in traces if t.get("task_goal")]
-    success = sum(1 for t in tasks if t.get("status") == "success")
-    failed = sum(1 for t in tasks if t.get("status") == "failed")
-    total_cost = round(sum(float(t.get("cost") or 0) for t in traces), 4)
-
-    # 团队编排统计（dh-team 轨迹）
-    team_traces = [t for t in traces if str(t.get("agent_id", "")).startswith("dh-team")]
-    team_runs = len(team_traces)
-    team_delegations = sum(int(t.get("delegations") or 0) for t in team_traces)
-    team_delegations_failed = sum(int(t.get("delegations_failed") or 0) for t in team_traces)
+    """聚合统计：Agent / 任务 / 成本 / 团队编排 / 进化 / 趋势（SQL 端聚合，O(1) 扫描）。"""
+    stats = trace_store.aggregate_stats()
 
     # 进化统计（evolution_store）
     try:
@@ -75,23 +64,6 @@ async def dashboard_summary():
     for e in evo:
         evo_counts[e.get("status", "")] = evo_counts.get(e.get("status", ""), 0) + 1
 
-    # 7 日成本趋势 + 评测得分最近 8 条
-    import time as _time
-    now = _time.time()
-    day_sec = 86400
-    daily: list[dict] = []
-    for i in range(6, -1, -1):
-        start, end = now - (i + 1) * day_sec, now - i * day_sec
-        day_cost = round(sum(float(t.get("cost") or 0) for t in traces if start <= (t.get("received_at") or 0) < end), 4)
-        daily.append({"day": _time.strftime("%m-%d", _time.localtime(start)), "cost": day_cost})
-    # list_traces 按 received_at DESC → 取前 8 条即最新（修复：[-8:] 取到最旧 8 条）
-    eval_traces = [
-        {"agent_id": t.get("agent_id"), "score": t.get("score"), "received_at": t.get("received_at")}
-        for t in traces
-        if (str(t.get("agent_id", "")).startswith("eval:") or str(t.get("agent_id", "")).startswith("evolve:"))
-        and t.get("score") is not None
-    ][:8]
-
     # Agent 数量：真实 penguin 跨项目展开；服务不可达时降级为 0
     try:
         agents = await _all_agents()
@@ -101,19 +73,15 @@ async def dashboard_summary():
 
     return {
         "agents": agent_count,
-        "tasks": len(tasks),
-        "tasks_success": success,
-        "tasks_failed": failed,
-        "traces": len(traces),
-        "total_cost": total_cost,
-        "team": {
-            "runs": team_runs,
-            "delegations": team_delegations,
-            "delegations_failed": team_delegations_failed,
-        },
+        "tasks": stats["tasks"],
+        "tasks_success": stats["tasks_success"],
+        "tasks_failed": stats["tasks_failed"],
+        "traces": stats["traces"],
+        "total_cost": stats["total_cost"],
+        "team": stats["team"],
         "evolution": evo_counts,
-        "daily_cost": daily,
-        "recent_scores": eval_traces,
+        "daily_cost": trace_store.cost_by_day(7),
+        "recent_scores": trace_store.recent_scores(8),
     }
 
 

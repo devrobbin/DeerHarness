@@ -19,6 +19,7 @@ import json
 import os
 import shlex
 import subprocess
+import threading
 import time
 
 import config
@@ -49,10 +50,17 @@ def _load_config() -> dict:
     }
 
 
+_config_lock = threading.Lock()
+
+
 def _save_config(config: dict):
-    os.makedirs(os.path.dirname(CONFIG_FILE), exist_ok=True)
-    with open(CONFIG_FILE, "w") as f:
-        json.dump(config, f, indent=2, ensure_ascii=False)
+    """原子写：锁 + 临时文件 + os.replace（评审 P2-1）。"""
+    with _config_lock:
+        os.makedirs(os.path.dirname(CONFIG_FILE), exist_ok=True)
+        tmp = CONFIG_FILE + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(config, f, indent=2, ensure_ascii=False)
+        os.replace(tmp, CONFIG_FILE)
 
 
 # ==================== 模型管理 ====================

@@ -229,7 +229,8 @@ async def _sync_agent(agent_id: str, project_id: str) -> str:
 @router.post("/sync")
 async def fusion_sync(req: FusionSyncRequest, user: User = Depends(require_admin)):
     """同步单个 penguin Agent 到 DeerFlow（幂等）。"""
-    project_id = req.project_id or "default_project"
+    req.agent_id = valid_id(req.agent_id, "agent_id")
+    project_id = valid_id(req.project_id or "default_project", "project_id")
     name = await _sync_agent(req.agent_id, project_id)
     return {"success": True, "agent_id": req.agent_id, "deerflow_agent": name}
 
@@ -570,6 +571,7 @@ async def _read_penguin_agent_defs() -> list[dict]:
             {
                 "agent_id": aid,
                 "name": agent.get("name", aid),
+                "description": agent.get("description", ""),
                 "project_id": agent["project_id"],
                 "system_prompt": definition["system_prompt"],
                 "tools": definition["tools"],
@@ -714,11 +716,18 @@ async def fusion_team_sync(req: Optional[FusionTeamSyncRequest] = None, user: Us
 
 
 def _member_desc(member: dict) -> str:
-    """提取成员的一行职责描述（跳过同步包装层与结构标记行）。"""
+    """提取成员的一行职责描述。
+
+    优先 penguin 的 description 字段（区分度高）；回退 prompt 中首个
+    非结构标记行；最后回退 name/agent_id（评审 P2-2：避免全员雷同）。
+    """
+    desc = (member.get("description") or "").strip()
+    if desc:
+        return desc[:60]
     prompt = member.get("system_prompt") or ""
     for line in prompt.splitlines():
         line = line.strip()
-        if not line or line.startswith(("#", "以下职责说明", "其中提及")):
+        if not line or line.startswith(("#", "以下职责说明", "其中提及", "You are PenguinHarness")):
             continue
         return line[:60]
     return member.get("name") or member.get("agent_id", "")

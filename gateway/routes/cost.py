@@ -25,11 +25,10 @@ async def cost_summary(days: Optional[int] = None):
 async def agent_cost(agent_id: str):
     """单个 Agent 的成本明细。"""
     agent_id = valid_id(agent_id, "agent_id")
-    traces = trace_store.list_traces(limit=10000, agent_id=agent_id)
-    if not traces:
+    row = trace_store.agent_cost_row(agent_id)
+    if row is None or row["count"] == 0:
         raise HTTPException(status_code=404, detail="该 Agent 暂无成本数据")
-    cost = sum(float(t.get("cost") or 0) for t in traces)
-    return {"agent_id": agent_id, "traces": len(traces), "cost": round(cost, 4)}
+    return {"agent_id": agent_id, "traces": row["count"], "cost": round(row["cost"], 4)}
 
 
 @router.get("/traces/{trace_id}")

@@ -37,7 +37,7 @@ export function ScoreChart({ taskId }: Props) {
                 <div className="h-6 flex-1 rounded bg-gray-100 dark:bg-gray-700">
                   <div
                     className="flex h-6 items-center rounded bg-gradient-to-r from-purple-400 to-blue-500 px-2 text-xs text-white"
-                    style={{ width: `${Math.max(4, (v.score ?? 0) * 1.2)}%` }}
+                    style={{ width: `${Math.min(100, Math.max(4, (v.score ?? 0) * 1.2))}%` }}
                   >
                     {v.score ?? '-'}
                   </div>

@@ -7,6 +7,7 @@ import hmac
 import json
 import os
 import secrets
+import threading
 import time
 
 import config
@@ -25,17 +26,27 @@ class User(BaseModel):
     created_at: float
 
 
+_users_lock = threading.Lock()
+
+
 def _load_users() -> list[dict]:
     if os.path.exists(USERS_FILE):
-        with open(USERS_FILE, "r") as f:
-            return json.load(f)
+        try:
+            with open(USERS_FILE, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except (json.JSONDecodeError, OSError):
+            return []
     return []
 
 
 def _save_users(users: list[dict]):
-    os.makedirs(os.path.dirname(USERS_FILE), exist_ok=True)
-    with open(USERS_FILE, "w") as f:
-        json.dump(users, f, indent=2)
+    """原子写：锁 + 临时文件 + os.replace（评审 P2-1：并发写不丢更新）。"""
+    with _users_lock:
+        os.makedirs(os.path.dirname(USERS_FILE), exist_ok=True)
+        tmp = USERS_FILE + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(users, f, indent=2)
+        os.replace(tmp, USERS_FILE)
 
 
 def create_user(username: str, api_key: str, role: str = "developer") -> User:

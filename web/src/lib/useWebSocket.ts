@@ -15,6 +15,8 @@ export function useWebSocket(channel?: string) {
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
+    // 频道切换时清空旧频道消息（评审 P1-3）
+    setMessages([]);
     let disposed = false;
 
     const connect = () => {

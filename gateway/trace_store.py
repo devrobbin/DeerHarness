@@ -22,7 +22,7 @@ def _get_conn() -> sqlite3.Connection:
     global _conn
     if _conn is None:
         os.makedirs(os.path.dirname(_DB_FILE), exist_ok=True)
-        _conn = sqlite3.connect(_DB_FILE, check_same_thread=False)
+        _conn = sqlite3.connect(_DB_FILE, check_same_thread=False, timeout=30)
         _conn.execute("PRAGMA journal_mode=WAL")
         _conn.execute(
             """
@@ -165,3 +165,85 @@ def cost_summary(days: int | None = None) -> dict:
         agent: {"count": count, "cost": round(cost or 0, 4)}
         for agent, count, cost in rows
     }
+
+
+def aggregate_stats() -> dict:
+    """SQL 端聚合：总成本/任务/成败/团队（替代全表拉取的 O(n) 扫描）。"""
+    with _lock:
+        conn = _get_conn()
+        total_cost = conn.execute("SELECT COALESCE(SUM(cost),0) FROM traces").fetchone()[0]
+        traces_n = conn.execute("SELECT COUNT(*) FROM traces").fetchone()[0]
+        # 任务口径：task_goal 非空且排除评测/进化轨迹
+        tasks_n = conn.execute(
+            "SELECT COUNT(*) FROM traces WHERE task_goal != ''"
+            " AND agent_id NOT LIKE 'eval:%' AND agent_id NOT LIKE 'evolve:%'"
+        ).fetchone()[0]
+        success = conn.execute(
+            "SELECT COUNT(*) FROM traces WHERE status='success' AND task_goal != ''"
+            " AND agent_id NOT LIKE 'eval:%' AND agent_id NOT LIKE 'evolve:%'"
+        ).fetchone()[0]
+        failed = conn.execute(
+            "SELECT COUNT(*) FROM traces WHERE status='failed' AND task_goal != ''"
+            " AND agent_id NOT LIKE 'eval:%' AND agent_id NOT LIKE 'evolve:%'"
+        ).fetchone()[0]
+        team_runs = conn.execute("SELECT COUNT(*) FROM traces WHERE agent_id LIKE 'dh-team%'").fetchone()[0]
+        team_delegations = conn.execute(
+            "SELECT COALESCE(SUM(CAST(meta->>'$.delegations' AS INTEGER)),0) FROM traces WHERE agent_id LIKE 'dh-team%'"
+        ).fetchone()[0]
+        team_delegations_failed = conn.execute(
+            "SELECT COALESCE(SUM(CAST(meta->>'$.delegations_failed' AS INTEGER)),0) FROM traces WHERE agent_id LIKE 'dh-team%'"
+        ).fetchone()[0]
+    return {
+        "total_cost": round(float(total_cost or 0), 4),
+        "traces": traces_n,
+        "tasks": tasks_n,
+        "tasks_success": success,
+        "tasks_failed": failed,
+        "team": {
+            "runs": team_runs,
+            "delegations": team_delegations,
+            "delegations_failed": team_delegations_failed,
+        },
+    }
+
+
+def cost_by_day(days: int = 7) -> list[dict]:
+    """按自然日聚合成本（标签为当天日期，修复滚动窗口起点标签）。"""
+    cutoff = time.time() - (days - 1) * 86400
+    with _lock:
+        conn = _get_conn()
+        rows = conn.execute(
+            "SELECT date(received_at, 'unixepoch', 'localtime') AS day, COALESCE(SUM(cost),0)"
+            " FROM traces WHERE received_at >= ? GROUP BY day ORDER BY day",
+            (cutoff,),
+        ).fetchall()
+    by_day = {r[0]: float(r[1]) for r in rows}
+    out = []
+    for i in range(days - 1, -1, -1):
+        day = time.localtime(time.time() - i * 86400)
+        label = time.strftime("%m-%d", day)
+        out.append({"day": label, "cost": round(by_day.get(label, 0.0), 4)})
+    return out
+
+
+def recent_scores(limit: int = 8) -> list[dict]:
+    """最近 N 条评测得分（eval:/evolve: 前缀，按时间倒序）。"""
+    with _lock:
+        conn = _get_conn()
+        rows = conn.execute(
+            "SELECT agent_id, CAST(meta->>'$.score' AS REAL) AS score, received_at FROM traces"
+            " WHERE (agent_id LIKE 'eval:%' OR agent_id LIKE 'evolve:%')"
+            " AND meta LIKE '%score%' ORDER BY received_at DESC LIMIT ?",
+            (limit,),
+        ).fetchall()
+    return [{"agent_id": r[0], "score": r[1], "received_at": r[2]} for r in rows if r[1] is not None]
+
+
+def agent_cost_row(agent_id: str) -> dict | None:
+    """单 Agent 的 (count, cost) SQL 聚合。"""
+    with _lock:
+        row = _get_conn().execute(
+            "SELECT COUNT(*), COALESCE(SUM(cost),0) FROM traces WHERE agent_id = ?",
+            (agent_id,),
+        ).fetchone()
+    return {"count": row[0], "cost": float(row[1] or 0)} if row else None
