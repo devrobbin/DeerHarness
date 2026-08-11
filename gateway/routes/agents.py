@@ -112,6 +112,72 @@ async def get_agent(agent_id: str):
     raise HTTPException(status_code=404, detail="Agent 不存在")
 
 
+async def _find_agent_project(agent_id: str) -> str:
+    """跨项目查找 Agent 所属项目（config 读写需要 projectId）。"""
+    agent_id = valid_id(agent_id, "agent_id")
+    for agent in await _all_agents():
+        if agent.get("agentId") == agent_id:
+            return agent["project_id"]
+    raise HTTPException(status_code=404, detail="Agent 不存在")
+
+
+class AgentModelConfig(BaseModel):
+    max_tokens: Optional[int] = None
+    thinking_level: Optional[str] = None  # none / low / medium / high / xhigh
+    timeout_ms: Optional[int] = None
+
+
+class AgentConfigUpdate(BaseModel):
+    name: Optional[str] = None
+    description: Optional[str] = None
+    system_prompt: Optional[str] = None
+    max_turns: Optional[int] = None
+    model: Optional[AgentModelConfig] = None
+
+
+def _to_penguin_model(model: AgentModelConfig) -> dict:
+    """snake_case → penguin camelCase，仅包含非空字段（部分更新）。"""
+    out: dict = {}
+    if model.max_tokens is not None:
+        out["maxTokens"] = model.max_tokens
+    if model.thinking_level is not None:
+        out["thinkingLevel"] = model.thinking_level
+    if model.timeout_ms is not None:
+        out["timeoutMs"] = model.timeout_ms
+    return out
+
+
+@router.get("/{agent_id}/config")
+async def get_agent_config(agent_id: str):
+    """Agent 配置（移植 PenguinHarness agent-settings-page：定义 / 人设 / 运行参数）。"""
+    project_id = await _find_agent_project(agent_id)
+    view = await _proxy("GET", f"/api/projects/{project_id}/agents/{agent_id}/config")
+    return {"agent_id": agent_id, "project_id": project_id, "config": view.get("config", {})}
+
+
+@router.put("/{agent_id}/config")
+async def update_agent_config(agent_id: str, req: AgentConfigUpdate):
+    """更新 Agent 配置（部分更新，与上游契约一致：{config: {...}}）。"""
+    project_id = await _find_agent_project(agent_id)
+    body: dict = {}
+    if req.name is not None:
+        body["name"] = req.name
+    if req.description is not None:
+        body["description"] = req.description
+    if req.system_prompt is not None:
+        body["systemPrompt"] = req.system_prompt
+    if req.max_turns is not None:
+        body["maxTurns"] = req.max_turns
+    if req.model is not None:
+        body["model"] = _to_penguin_model(req.model)
+    view = await _proxy(
+        "PUT",
+        f"/api/projects/{project_id}/agents/{agent_id}/config",
+        json={"config": body},
+    )
+    return {"success": True, "agent_id": agent_id, "config": view.get("config", {})}
+
+
 @router.delete("/{agent_id}")
 async def delete_agent(agent_id: str, project_id: str):
     """删除 Agent（需指定所属项目）。"""

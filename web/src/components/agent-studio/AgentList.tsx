@@ -2,6 +2,7 @@
 
 import React, { useEffect, useState } from 'react';
 import { apiDelete, apiGet } from '@/lib/api';
+import { AgentSettings } from '@/components/agent-studio/AgentSettings';
 
 interface Agent {
   id?: string;
@@ -16,6 +17,7 @@ interface Agent {
 
 export function AgentList() {
   const [agents, setAgents] = useState<Agent[]>([]);
+  const [editing, setEditing] = useState<Agent | null>(null);
 
   const fetchAgents = async () => {
     try {
@@ -31,6 +33,7 @@ export function AgentList() {
     const id = agent.agentId ?? agent.id ?? agent.agent_id ?? '';
     const projectId = agent.project_id ?? 'default_project';
     if (!id) return;
+    if (!window.confirm(`删除 Agent「${agent.name}」？`)) return;
     try {
       await apiDelete(`/api/agents/${encodeURIComponent(id)}?project_id=${encodeURIComponent(projectId)}`);
       fetchAgents();
@@ -48,21 +51,38 @@ export function AgentList() {
       <div className="space-y-2">
         {agents.map(a => (
           <div key={a.id ?? a.agent_id ?? a.name} className="flex items-center justify-between rounded border border-gray-100 p-2 text-sm">
-            <div>
+            <div className="min-w-0">
               <span className="font-medium">{a.name}</span>
               <span className="ml-2 text-xs text-gray-400">{a.model ?? ''}</span>
-              <p className="text-xs text-gray-500">{a.description}</p>
+              <p className="truncate text-xs text-gray-500">{a.description}</p>
             </div>
-            <button
-              onClick={() => handleDelete(a)}
-              className="text-red-500 text-sm hover:text-red-700"
-            >
-              删除
-            </button>
+            <div className="flex shrink-0 items-center gap-2">
+              <button
+                onClick={() => setEditing(a)}
+                className="text-blue-500 text-sm hover:text-blue-700"
+                title="编辑定义 / 人设 / 运行参数"
+              >
+                编辑
+              </button>
+              <button
+                onClick={() => handleDelete(a)}
+                className="text-red-500 text-sm hover:text-red-700"
+              >
+                删除
+              </button>
+            </div>
           </div>
         ))}
         {agents.length === 0 && <p className="text-center text-sm text-gray-400">暂无 Agent</p>}
       </div>
+
+      {editing && (
+        <AgentSettings
+          agent={editing}
+          onClose={() => setEditing(null)}
+          onSaved={fetchAgents}
+        />
+      )}
     </div>
   );
 }
