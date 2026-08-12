@@ -229,18 +229,17 @@ async def _propose_improvement(
         + rejected_hint
     )
     try:
-        resp = httpx.post(
-            "https://api.deepseek.com/chat/completions",
-            headers={"Authorization": f"Bearer {config.DEEPSEEK_API_KEY}"},
-            json={
-                "model": "deepseek-v4-flash",
-                "messages": [{"role": "user", "content": prompt}],
-                "temperature": 0.4,
-                "max_tokens": 3000,
-            },
-            timeout=90,
-            trust_env=False,
-        )
+        async with httpx.AsyncClient(trust_env=False, timeout=90) as client:
+            resp = await client.post(
+                "https://api.deepseek.com/chat/completions",
+                headers={"Authorization": f"Bearer {config.DEEPSEEK_API_KEY}"},
+                json={
+                    "model": "deepseek-v4-flash",
+                    "messages": [{"role": "user", "content": prompt}],
+                    "temperature": 0.4,
+                    "max_tokens": 3000,
+                },
+            )
         text = resp.json()["choices"][0]["message"]["content"]
         proposal = _parse_proposal_json(text)
         if not proposal or proposal.get("target") not in _TARGETS:

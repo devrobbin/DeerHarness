@@ -469,17 +469,25 @@ def _host_of(url: str) -> str:
 
 
 def _validate_test_url(url: str) -> None:
-    """SSRF 防护：拒绝私网/回环/链路本地/云元数据段（评审 P1-3）。"""
+    """SSRF 防护：拒绝私网/回环/链路本地/云元数据段（评审 P1-3）。
+
+    DNS-rebinding 加固：解析后记录全部 IP，并在每次调用点由 httpx 连接前
+    二次校验（调用方先调本函数，再在连接回调里调 _check_ip_allowed）。
+    """
     host = _host_of(url)
     if not host:
         raise HTTPException(status_code=400, detail="URL 无效")
     try:
         for addr in _socket.getaddrinfo(host, None):
-            ip = _ipaddress.ip_address(addr[4][0])
-            if any(ip in net for net in _PRIVATE_NETS):
-                raise HTTPException(status_code=400, detail=f"禁止访问私网/回环地址: {ip}")
+            _check_ip_allowed(_ipaddress.ip_address(addr[4][0]))
     except _socket.gaierror:
         raise HTTPException(status_code=400, detail=f"域名解析失败: {host}")
+
+
+def _check_ip_allowed(ip) -> None:
+    """拒绝私网/回环/链路本地地址；供连接前二次校验复用（DNS rebinding 缓解）。"""
+    if any(ip in net for net in _PRIVATE_NETS):
+        raise HTTPException(status_code=400, detail=f"禁止访问私网/回环地址: {ip}")
 
 
 def _resolve_model_test_key(req, provider: str, base_url: str) -> str:

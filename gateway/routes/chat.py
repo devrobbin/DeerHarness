@@ -41,6 +41,25 @@ class ChatRequest(BaseModel):
     thread_id: Optional[str] = None
 
 
+def _under_chat_budget() -> bool:
+    """请求级预算护栏：近 1h 内 dh-chat 轨迹累计成本 < MAX_COST_PER_REQUEST。"""
+    if config.MAX_COST_PER_REQUEST <= 0:
+        return True  # 0 = 不限
+    import time as _t
+    import trace_store
+    try:
+        rows = trace_store.list_traces(limit=500)
+    except Exception:
+        return True
+    cutoff = _t.time() - 3600
+    total = sum(
+        float(t.get("cost") or 0)
+        for t in rows
+        if str(t.get("agent_id", "")).startswith("dh-chat") and (t.get("received_at") or 0) >= cutoff
+    )
+    return total < config.MAX_COST_PER_REQUEST
+
+
 async def _proxy(method: str, path: str, **kwargs) -> dict:
     try:
         resp = await deerflow.request(method, path, **kwargs)
@@ -54,6 +73,9 @@ async def _proxy(method: str, path: str, **kwargs) -> dict:
 @router.post("/stream")
 async def chat_stream(req: ChatRequest, user: User = Depends(require_developer)):
     """流式对话：转发 DeerFlow SSE，提取 AI 文本增量（打字机效果）。"""
+    # 请求级预算护栏（评审 P1-4）：累计会话成本超限拒绝新对话
+    if not _under_chat_budget():
+        raise HTTPException(status_code=429, detail="对话预算已超限（MAX_COST_PER_REQUEST），请稍后再试")
     thread_id = req.thread_id or f"dh-chat-{uuid.uuid4().hex[:12]}"
     if req.thread_id:
         thread_id = valid_id(thread_id, "thread_id")
@@ -102,13 +124,23 @@ async def chat_stream(req: ChatRequest, user: User = Depends(require_developer))
                 if delta:
                     yield f"event: text\ndata: {json.dumps(delta)}\n\n"
                 prev = text
-            # 观测闭环（评审 C）：流正常结束 → 记录轨迹
+            # 观测闭环（评审 C）：流正常结束 → 记录轨迹（含真实 token 成本）
+            cost = 0.0
+            try:
+                runs = await _proxy("GET", f"/api/threads/{thread_id}/runs")
+                run_list = runs.get("runs") if isinstance(runs, dict) else (runs if isinstance(runs, list) else [])
+                if run_list:
+                    from .fusion import _estimate_run_cost
+                    cost = _estimate_run_cost(run_list[-1])
+            except Exception:
+                pass
             record_trace(
                 "dh-chat",
                 "success",
                 task_goal=req.message[:200],
                 thread_id=thread_id,
                 duration_s=round(time.monotonic() - _started, 1),
+                cost=round(cost, 6),
             )
             yield "event: done\ndata: {}\n\n"
         except Exception:

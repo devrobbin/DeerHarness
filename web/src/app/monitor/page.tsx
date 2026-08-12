@@ -67,7 +67,6 @@ function traceType(agentId: string): 'chat' | 'team' | 'evolve' | 'other' {
   return 'other';
 }
 
-const TYPE_LABELS: Record<string, string> = { chat: '💬 对话', team: '🧭 团队', evolve: '🧬 进化', other: '⚙️ 其他' };
 
 export default function MonitorPage() {
   const { t } = useI18n();
@@ -157,7 +156,7 @@ export default function MonitorPage() {
             {connected ? t.monitor.liveConnected : t.monitor.offline}
           </span>
           <button onClick={load} className="rounded bg-gray-800 px-4 py-2 text-sm text-white hover:bg-gray-700">
-            刷新
+            {t.monitor.refresh}
           </button>
         </div>
       </div>
@@ -289,7 +288,7 @@ export default function MonitorPage() {
             <div className="flex gap-2">
               <select value={typeFilter} onChange={e => setTypeFilter(e.target.value)} className="rounded border border-gray-300 p-1.5 text-xs dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100">
                 <option value="">{t.monitor.allTypes}</option>
-                {Object.entries(TYPE_LABELS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+                {Object.entries(t.monitor.traceType).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
               </select>
               <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)} className="rounded border border-gray-300 p-1.5 text-xs dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100">
                 <option value="">{t.monitor.allStatus}</option>

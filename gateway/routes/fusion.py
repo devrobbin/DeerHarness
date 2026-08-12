@@ -971,18 +971,17 @@ async def _score_replies(results: list[dict]) -> list[dict]:
     for r in results:
         prompt += f"## Case {r['id']}（{r['title']}）\n题目：{r['statement'][:500]}\nAgent 回复：{r['reply'][:800]}\n\n"
     try:
-        resp = httpx.post(
-            "https://api.deepseek.com/chat/completions",
-            headers={"Authorization": f"Bearer {config.DEEPSEEK_API_KEY}"},
-            json={
-                "model": "deepseek-v4-flash",
-                "messages": [{"role": "user", "content": prompt}],
-                "temperature": 0.2,
-                "max_tokens": 1500,
-            },
-            timeout=60,
-            trust_env=False,
-        )
+        async with httpx.AsyncClient(trust_env=False, timeout=60) as client:
+            resp = await client.post(
+                "https://api.deepseek.com/chat/completions",
+                headers={"Authorization": f"Bearer {config.DEEPSEEK_API_KEY}"},
+                json={
+                    "model": "deepseek-v4-flash",
+                    "messages": [{"role": "user", "content": prompt}],
+                    "temperature": 0.2,
+                    "max_tokens": 1500,
+                },
+            )
         content = resp.json()["choices"][0]["message"]["content"]
         content = content.strip()
         # 剥离可能的 ```json 代码块包裹

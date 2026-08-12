@@ -1,6 +1,6 @@
 'use client';
 
-import React, { createContext, useCallback, useContext, useEffect, useState } from 'react';
+import React, { createContext, useCallback, useContext, useEffect, useMemo, useState } from 'react';
 
 /**
  * DeerHarness 轻量 i18n（移植 DeerFlow appearance-settings 的语言切换）。
@@ -44,6 +44,7 @@ const zhCN = {
     allTypes: '全部类型',
     allStatus: '全部状态',
     noData: '暂无数据',
+    traceType: { chat: '💬 对话', team: '🧭 团队', evolve: '🧬 进化', other: '⚙️ 其他' },
     refresh: '刷新',
     liveConnected: '实时连接',
     offline: '离线',
@@ -274,6 +275,7 @@ const enUS: I18nDict = {
     allTypes: 'All types',
     allStatus: 'All statuses',
     noData: 'No data',
+    traceType: { chat: '💬 Chat', team: '🧭 Team', evolve: '🧬 Evolution', other: '⚙️ Other' },
     refresh: 'Refresh',
     liveConnected: 'Live',
     offline: 'Offline',
@@ -578,6 +580,7 @@ function withRuntimeFallback(dict: I18nDict, lang: Lang): I18nDict {
 
 export function useI18n(): I18nContextValue {
   const ctx = useContext(I18nContext);
-  // en 模式下应用运行时缺键回退
-  return { ...ctx, t: withRuntimeFallback(ctx.t, ctx.lang) };
+  // en 模式下应用运行时缺键回退；useMemo 缓存 Proxy，避免每次渲染重建（评审 P2-1）
+  const t = useMemo(() => withRuntimeFallback(ctx.t, ctx.lang), [ctx.t, ctx.lang]);
+  return { ...ctx, t };
 }
