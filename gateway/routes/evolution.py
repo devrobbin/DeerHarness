@@ -365,24 +365,29 @@ async def _advance_inner(task_id: str) -> None:
             "statement": case["statement"],
             "reply": reply,
             "status": status,
+            "_case_cost": case_cost,
         })
         cost += case_cost
 
     # 2. 评分
     scored = await _score_replies([{k: r[k] for k in ("id", "title", "statement", "reply")} for r in results])
     avg = round(sum(c.get("score", 0) for c in scored) / max(1, len(scored)), 1)
-    cost += _EST_SCORE_COST * len(scored)
-    store.update_task(task_id, cost=round(cost, 6), last_avg_score=avg)
+    # 本轮增量成本 = 本轮 case 成本 + 评分费（cost 已含旧累计，剔除后累计）
+    round_case_cost = round(sum(r.get("_case_cost", 0.0) for r in results), 6)
+    round_cost = round(round_case_cost + _EST_SCORE_COST * len(scored), 6)
+    total_cost = round(float(task.get("cost") or 0) + round_cost, 6)
+    store.update_task(task_id, cost=total_cost, last_avg_score=avg)
     store.record_version(
         task_id, round_no, avg,
         f"第 {round_no} 轮评估（{len(scored)} 用例）",
         {"cases": scored, "team_mode": team_mode},
     )
+    # trace 记本轮增量成本（修复：累计值跨轮 SUM 重复累加）
     record_trace(
         f"eval:{task_id}", "success",
         task_goal=f"进化[{task['target_type']}] 第{round_no}轮",
         score=avg, benchmark_id="evolution", version_baseline=round_no,
-        cost=round(cost, 6),
+        cost=round(round_cost, 6),
     )
     await _publish(task_id, "evolution_progress", {
         "current_round": round_no, "max_rounds": max_rounds, "avg_score": avg,
@@ -550,8 +555,13 @@ async def evolution_approve(task_id: str, req: ApprovalRequest, user: User = Dep
         store.set_approval_status(req.approval_id, "pending")
         store.update_task(task_id, status="waiting_approval")
         raise
-    # 应用后标记验证轮：下一轮评估改进效果后直接结束（评审 P2-4）
-    store.update_task(task_id, status="running", meta='{"pending_verify": true}')
+    # 应用后标记验证轮：合并 meta 而非整体覆盖，保全 reject 累积的负面样本（评审 P3-4）
+    try:
+        meta = json.loads(task.get("meta") or "{}")
+    except (json.JSONDecodeError, TypeError):
+        meta = {}
+    meta["pending_verify"] = True
+    store.update_task(task_id, status="running", meta=json.dumps(meta, ensure_ascii=False))
     asyncio.create_task(_advance(task_id))
     return {"success": True}
 

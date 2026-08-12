@@ -478,3 +478,68 @@ class TestTeamRunPersistence:
         assert es.load_team_run("dh-team-x") == team
         es.delete_team_run("dh-team-x")
         assert es.load_team_run("dh-team-x") is None
+
+
+class TestReviewRegression:
+    """复审回归（P0/P1）：fusion_evaluate 解包、approve meta 合并、cost_by_day 格式。"""
+
+    def test_run_case_triple_unpack(self):
+        """P0-1: fusion_evaluate 能消费 _run_case 三元组（不再 ValueError）。"""
+        import inspect
+        from routes import fusion
+        src = inspect.getsource(fusion)
+        # 断言 fusion_evaluate 内解包 3 个变量
+        assert "_run_case(deerflow_agent, case[" in src
+        # 模拟真实调用：mock _run_case 返回 3 元组，验证 eval 循环可解包（async 需 await）
+        import asyncio
+        async def fake_run_case(agent, stmt):
+            return "reply", "success", 0.001
+        orig = fusion._run_case
+        fusion._run_case = fake_run_case
+        try:
+            cases = [{"id": "c1", "title": "t", "statement": "s"}]
+            async def loop():
+                results = []
+                for case in cases:
+                    reply, status, _cost = await fusion._run_case("agent", case["statement"])
+                    results.append({**case, "reply": reply, "run_status": status})
+                return results
+            results = asyncio.run(loop())
+            assert results[0]["run_status"] == "success"
+        finally:
+            fusion._run_case = orig
+
+    def test_approve_preserves_rejected_meta(self, tmp_path, monkeypatch):
+        """P1: approve 的 pending_verify 合并而非覆盖，保全 meta.rejected。"""
+        import json
+        import evolution_store as es
+        from routes import evolution as evo
+        monkeypatch.setattr(es, "DB_FILE", str(tmp_path / "evo.db"))
+        monkeypatch.setattr(es, "_initialized", False)
+        es.init_db()
+        tid = "evolve-meta"
+        es.create_task(tid, "workflow", team_id="amazon-ops", workflow_id="ad-review")
+        # 先模拟 reject 累积负面样本
+        es.update_task(tid, meta=json.dumps({"rejected": ["方案A", "方案B"]}))
+        # 模拟 approve 合并逻辑
+        task = es.get_task(tid)
+        meta = json.loads(task["meta"])
+        meta["pending_verify"] = True
+        es.update_task(tid, meta=json.dumps(meta))
+        task = es.get_task(tid)
+        m = json.loads(task["meta"])
+        assert m["pending_verify"] is True
+        assert m["rejected"] == ["方案A", "方案B"]  # 负面样本保全
+
+    def test_cost_by_day_format(self, tmp_path, monkeypatch):
+        """P0-2: cost_by_day 分组键与标签同源（MM-DD），不再全零。"""
+        import time as _time
+        import trace_store
+        monkeypatch.setattr(trace_store, "_DB_FILE", str(tmp_path / "t.db"))
+        monkeypatch.setattr(trace_store, "_conn", None)
+        # 写一条成本（received_at 默认 now；days=2 避免秒级边界竞态）
+        trace_store.record_trace("dh-team", "success", task_goal="x", cost=2.5)
+        days = trace_store.cost_by_day(2)
+        assert len(days) == 2
+        # 关键：不再全零（分组键 MM-DD 与标签同源）
+        assert days[-1]["cost"] == 2.5

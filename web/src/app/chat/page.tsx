@@ -126,10 +126,22 @@ export default function ChatPage() {
     const prevOverflow = document.body.style.overflow;
     document.body.style.overflow = 'hidden';
     const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setDrawerMember(null); };
+    // 焦点 trap + 初始聚焦关闭按钮（对齐 AgentSettings，评审 P1-2）
+    const onFocus = (e: FocusEvent) => {
+      const panel = document.querySelector('[data-member-drawer]');
+      if (panel && !panel.contains(e.target as Node)) {
+        (panel.querySelector('button[aria-label="关闭"]') as HTMLElement | null)?.focus();
+      }
+    };
     document.addEventListener('keydown', onKey);
+    document.addEventListener('focusin', onFocus);
+    requestAnimationFrame(() => {
+      (document.querySelector('[data-member-drawer] button[aria-label="关闭"]') as HTMLElement | null)?.focus();
+    });
     return () => {
       document.body.style.overflow = prevOverflow;
       document.removeEventListener('keydown', onKey);
+      document.removeEventListener('focusin', onFocus);
     };
   }, [drawerMember]);
 
@@ -574,6 +586,7 @@ export default function ChatPage() {
         <div className="fixed inset-0 z-40 flex justify-end" role="dialog" aria-modal="true" aria-label={`${drawerMember.name} 会话内容`}>
           <div className="absolute inset-0 bg-black/30" onClick={() => setDrawerMember(null)} />
           <div
+            data-member-drawer
             className="relative z-10 flex h-full w-[26rem] max-w-[92vw] flex-col bg-white shadow-2xl dark:bg-gray-800"
             style={{ animation: 'drawer-in 0.22s ease' }}
           >

@@ -30,13 +30,14 @@ _users_lock = threading.Lock()
 
 
 def _load_users() -> list[dict]:
-    if os.path.exists(USERS_FILE):
-        try:
-            with open(USERS_FILE, "r", encoding="utf-8") as f:
-                return json.load(f)
-        except (json.JSONDecodeError, OSError):
-            return []
-    return []
+    with _users_lock:
+        if os.path.exists(USERS_FILE):
+            try:
+                with open(USERS_FILE, "r", encoding="utf-8") as f:
+                    return json.load(f)
+            except (json.JSONDecodeError, OSError):
+                return []
+        return []
 
 
 def _save_users(users: list[dict]):

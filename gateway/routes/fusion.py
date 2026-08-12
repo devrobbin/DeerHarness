@@ -818,7 +818,9 @@ async def fusion_evaluate(req: FusionEvaluateRequest, user: User = Depends(requi
     """
     req.agent_id = valid_id(req.agent_id, "agent_id")
     req.benchmark_id = valid_id(req.benchmark_id, "benchmark_id")
-    project_id = valid_id(req.project_id or "default_project", "project_id")
+    # 解析 agent 真实所属项目（修复：跨项目 agent 评测 404 的历史 bug，与 chat 一致）
+    from .agents import _find_agent_project
+    project_id = valid_id(req.project_id or await _find_agent_project(req.agent_id), "project_id")
 
     # 1. 同步（幂等），版本基线用 penguin 侧的 version（deer-flow agents API 无 updatedAt）
     deerflow_agent = await _sync_agent(req.agent_id, project_id)
@@ -841,7 +843,7 @@ async def fusion_evaluate(req: FusionEvaluateRequest, user: User = Depends(requi
     # 3. 逐 case 用 DeerFlow 执行
     results = []
     for case in cases:
-        reply, status = await _run_case(deerflow_agent, case["statement"])
+        reply, status, _cost = await _run_case(deerflow_agent, case["statement"])
         results.append({**case, "reply": reply, "run_status": status})
 
     # 4. LLM 批量评分

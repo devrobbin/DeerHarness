@@ -174,6 +174,8 @@ async def get_thread_messages(thread_id: str):
 async def chat(req: ChatRequest, user: User = Depends(require_developer)):
     """发送一条消息并等待 DeerFlow 模型回复。"""
     thread_id = req.thread_id or f"dh-chat-{uuid.uuid4().hex[:12]}"
+    if req.thread_id:
+        thread_id = valid_id(thread_id, "thread_id")
     try:
         # 1. 创建线程（幂等）
         await _proxy("POST", "/api/threads", json={"thread_id": thread_id})

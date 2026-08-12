@@ -209,12 +209,16 @@ def aggregate_stats() -> dict:
 
 
 def cost_by_day(days: int = 7) -> list[dict]:
-    """按自然日聚合成本（标签为当天日期，修复滚动窗口起点标签）。"""
+    """按自然日聚合成本（标签为当天日期，修复滚动窗口起点标签）。
+
+    分组键与标签统一为 MM-DD，避免 'YYYY-MM-DD' vs 'MM-DD' 格式错位导致全零。
+    """
     cutoff = time.time() - (days - 1) * 86400
     with _lock:
         conn = _get_conn()
         rows = conn.execute(
-            "SELECT date(received_at, 'unixepoch', 'localtime') AS day, COALESCE(SUM(cost),0)"
+            "SELECT strftime('%m-%d', received_at, 'unixepoch', 'localtime') AS day,"
+            " COALESCE(SUM(cost),0)"
             " FROM traces WHERE received_at >= ? GROUP BY day ORDER BY day",
             (cutoff,),
         ).fetchall()

@@ -31,12 +31,18 @@ VERSION = "0.5.0"
 
 CONFIG_FILE = os.path.join(os.path.dirname(__file__), "..", "config", "settings.json")
 
+_config_lock = threading.Lock()
+
 
 def _load_config() -> dict:
-    if os.path.exists(CONFIG_FILE):
-        with open(CONFIG_FILE, "r") as f:
-            return json.load(f)
-    return {
+    with _config_lock:
+        if os.path.exists(CONFIG_FILE):
+            try:
+                with open(CONFIG_FILE, "r", encoding="utf-8") as f:
+                    return json.load(f)
+            except (json.JSONDecodeError, OSError):
+                return {}
+        return {
         "models": [],
         "skills": [],
         "mcp_servers": [],
@@ -48,9 +54,6 @@ def _load_config() -> dict:
             "blocked_domains": [],
         },
     }
-
-
-_config_lock = threading.Lock()
 
 
 def _save_config(config: dict):
