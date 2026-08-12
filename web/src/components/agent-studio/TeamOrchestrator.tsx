@@ -33,6 +33,12 @@ interface TeamResult {
   thread_id?: string;
 }
 
+interface MemberStatus {
+  agent_id: string;
+  state: 'idle' | 'working' | 'done' | 'failed';
+  task_count: number;
+}
+
 /**
  * 多 Agent 团队编排（团队模式）：主代理（DeerFlow）把子任务分派给
  * 团队成员（PenguinHarness Agent 子代理）。
@@ -49,6 +55,14 @@ export function TeamOrchestrator() {
   const [workflow, setWorkflow] = useState('');
   const [task, setTask] = useState('');
   const [loading, setLoading] = useState(false);
+  // 非阻塞编排：实时成员状态（轮询 /team/status）
+  const [memberStatus, setMemberStatus] = useState<Record<string, MemberStatus>>({});
+  const pollRef = useRef<number | null>(null);
+
+  const stopPolling = () => {
+    if (pollRef.current !== null) { window.clearTimeout(pollRef.current); pollRef.current = null; }
+  };
+  useEffect(() => stopPolling, []);
   const [error, setError] = useState('');
   const [result, setResult] = useState<TeamResult | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -119,18 +133,52 @@ export function TeamOrchestrator() {
     setLoading(true);
     setError('');
     setResult(null);
+    setMemberStatus({});
     try {
-      const data = await apiPost<TeamResult>('/api/fusion/team/run', {
+      // 非阻塞启动：team/start 立即返回 thread_id，轮询 /team/status 实时展示成员进度
+      const start = await apiPost<{ thread_id: string }>('/api/fusion/team/start', {
         task: task.trim(),
         agent_ids: Array.from(selected),
         template: template || undefined,
         workflow: workflow || undefined,
       });
-      setResult(data);
+      const threadId = start.thread_id;
+      let attempts = 0;
+      const poll = async () => {
+        if (attempts++ > 200) { // 200 × 3s ≈ 10 分钟
+          setLoading(false);
+          setError('团队任务超时');
+          return;
+        }
+        try {
+          const d = await apiGet<{
+            thread_id: string; status: string; terminal: boolean;
+            members: MemberStatus[]; reply?: string; delegations?: { tool: string; result: string }[];
+          }>(`/api/fusion/team/status/${threadId}`);
+          if (d.members?.length) {
+            setMemberStatus(Object.fromEntries(d.members.map(m => [m.agent_id, m])));
+          }
+          if (!d.terminal) {
+            pollRef.current = window.setTimeout(poll, 3000);
+            return;
+          }
+          setLoading(false);
+          setResult({
+            reply: d.reply || '（团队任务已结束）',
+            status: d.status,
+            team: Array.from(selected),
+            delegations: d.delegations ?? [],
+            thread_id: threadId,
+          });
+        } catch (err) {
+          setLoading(false);
+          setError(`进度查询失败：${err instanceof Error ? err.message : err}`);
+        }
+      };
+      poll();
     } catch (err) {
-      setError(`编排失败：${err instanceof Error ? err.message : err}`);
-    } finally {
       setLoading(false);
+      setError(`编排失败：${err instanceof Error ? err.message : err}`);
     }
   };
 
@@ -254,6 +302,30 @@ export function TeamOrchestrator() {
                 ? `${activeTemplate.icon} ${activeTemplate.description.split('：')[0]} 正在拆解并分派任务给 ${selected.size} 个成员…`
                 : `主代理正在搜索、拆解并分派任务给 ${selected.size} 个成员…`}
             </span>
+          </div>
+        )}
+
+        {/* 实时成员状态（非阻塞轮询）：工作中转圈 / 完成 / 失败 */}
+        {loading && Object.keys(memberStatus).length > 0 && (
+          <div className="flex flex-wrap gap-1.5 text-xs">
+            {Object.entries(memberStatus).map(([aid, ms]) => {
+              const name = agents.find(a => a.agentId === aid)?.name ?? aid;
+              const cls = ms.state === 'working'
+                ? 'bg-purple-50 text-purple-600 dark:bg-purple-900/30 dark:text-purple-300'
+                : ms.state === 'done'
+                  ? 'bg-green-50 text-green-600 dark:bg-green-900/30 dark:text-green-400'
+                  : ms.state === 'failed'
+                    ? 'bg-red-50 text-red-500 dark:bg-red-900/30 dark:text-red-400'
+                    : 'bg-gray-100 text-gray-500 dark:bg-gray-700 dark:text-gray-400';
+              return (
+                <span key={aid} className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 ${cls}`}>
+                  {ms.state === 'working'
+                    ? <span className="inline-block h-3 w-3 animate-spin rounded-full border-2 border-purple-500 border-t-transparent" />
+                    : ms.state === 'done' ? '✅' : ms.state === 'failed' ? '❌' : '⏳'}
+                  {name}
+                </span>
+              );
+            })}
           </div>
         )}
 
