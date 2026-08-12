@@ -543,3 +543,50 @@ class TestReviewRegression:
         assert len(days) == 2
         # 关键：不再全零（分组键 MM-DD 与标签同源）
         assert days[-1]["cost"] == 2.5
+
+
+class TestOpenAPIFactory:
+    """OpenAPI 工具工厂（agent 可调真实 API）。"""
+
+    def test_parse_operations(self):
+        from openapi_factory import parse_openapi_doc
+        doc = {"openapi": "3.0.0", "info": {"title": "t", "version": "1"},
+          "paths": {
+            "/orders": {"get": {"operationId": "listOrders", "summary": "List orders",
+              "parameters": [{"name": "status", "in": "query", "schema": {"type": "string"}}]}},
+            "/products/{id}": {"get": {"operationId": "getProduct", "summary": "Get product",
+              "parameters": [{"name": "id", "in": "path", "required": True, "schema": {"type": "string"}}]}},
+          }}
+        tools = parse_openapi_doc(doc)
+        assert len(tools) == 2
+        assert tools[0]["name"] == "listorders"
+        assert "status" in tools[0]["parameters"]["properties"]
+        assert tools[1]["name"] == "getproduct"
+
+    def test_reject_bad_doc(self):
+        from openapi_factory import parse_openapi_doc, OpenAPIFactoryError
+        import pytest
+        with pytest.raises(OpenAPIFactoryError):
+            parse_openapi_doc({"no": "paths"})
+
+
+class TestFlowGraph:
+    """通信流图：orchestrator→成员 分派边解析。"""
+
+    TEAM = [{"agent_id": "ad_optimizer", "name": "广告优化", "system_prompt": "x"}]
+
+    def test_graph_edges(self):
+        from routes.fusion import _build_flow_graph
+        state = {"values": {"messages": [
+            {"type": "ai", "tool_calls": [{"id": "c1", "name": "task",
+                                           "args": {"description": "广告复盘", "prompt": "广告优化"}}]},
+            {"type": "tool", "name": "task", "tool_call_id": "c1",
+             "additional_kwargs": {"subagent_status": "completed"}},
+        ]}}
+        g = _build_flow_graph(state, self.TEAM, "orchestrator")
+        assert any(n["id"] == "orchestrator" for n in g["nodes"])
+        assert any(n["id"] == "ad_optimizer" for n in g["nodes"])
+        assert len(g["edges"]) == 1
+        e = g["edges"][0]
+        assert e["from"] == "orchestrator" and e["to"] == "ad_optimizer"
+        assert e["status"] == "completed"

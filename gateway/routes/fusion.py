@@ -1353,6 +1353,57 @@ async def fusion_team_status(thread_id: str):
         raise HTTPException(status_code=502, detail=f"团队进度查询失败: {exc}")
 
 
+def _build_flow_graph(state: dict, team: list[dict], orchestrator: str = "orchestrator") -> dict:
+    """把一次团队 run 的分派记录解析为通信流图数据（节点 + 有向边）。
+
+    节点 = orchestrator + 各成员；边 = 一次 task 分派（from=orchestrator, to=成员）。
+    复用 started/results 归因逻辑，与成员抽屉数据同源。
+    """
+    messages = (state.get("values") or {}).get("messages") or []
+    edges = []
+    started: dict[str, dict] = {}
+    results: dict[str, dict] = {}
+    for m in messages:
+        role = m.get("type") or m.get("role")
+        if role == "ai":
+            for tc in m.get("tool_calls") or []:
+                if tc.get("name") == "task":
+                    args = tc.get("args") or {}
+                    prompt = f"{args.get('description', '')}\n{args.get('prompt', '')}".strip()
+                    started[tc.get("id")] = {
+                        "member": _attribute_member(prompt, team),
+                        "desc": args.get("description", "")[:80],
+                    }
+        elif role == "tool" and m.get("name") == "task":
+            tcid = m.get("tool_call_id")
+            sub_status = (m.get("additional_kwargs") or {}).get("subagent_status") or m.get("status")
+            results[tcid] = "failed" if sub_status in ("failed", "error") else "completed"
+
+    nodes = {orchestrator: {"id": orchestrator, "name": orchestrator, "role": "orchestrator"}}
+    for tcid, s in started.items():
+        target = s["member"] or "unassigned"
+        nodes.setdefault(target, {"id": target, "name": target, "role": "member"})
+        edges.append({
+            "from": orchestrator,
+            "to": target,
+            "label": s["desc"] or "task",
+            "status": results.get(tcid, "running"),
+        })
+    return {"nodes": list(nodes.values()), "edges": edges}
+
+
+@router.get("/team/graph/{thread_id}")
+async def fusion_team_graph(thread_id: str, user: User = Depends(require_developer)):
+    """通信流可视化：一次团队 run 的 orchestrator→成员 分派图数据。"""
+    thread_id = valid_id(thread_id, "thread_id")
+    team = _load_team_run(thread_id)
+    try:
+        state = await _proxy_df("GET", f"/api/threads/{thread_id}/state")
+    except HTTPException as exc:
+        raise HTTPException(status_code=502, detail=f"图数据查询失败: {exc.detail}")
+    return _build_flow_graph(state, team)
+
+
 def _extract_delegation_details(state: dict, team: list[dict]) -> dict:
     """按成员聚合本次会话的分派详情（分派任务 prompt + 执行结果）。
 

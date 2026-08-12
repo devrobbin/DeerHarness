@@ -420,3 +420,59 @@ async def list_agent_versions(agent_id: str):
         if agent.get("agentId") == agent_id:
             return {"versions": [agent.get("version", 1)], "current": agent.get("version", 1)}
     raise HTTPException(status_code=404, detail="Agent 不存在")
+
+
+# ==================== OpenAPI 工具工厂 ====================
+
+import openapi_factory
+
+
+class OpenAPIRequest(BaseModel):
+    agent_id: str
+    spec: Optional[dict] = None       # 直接传 OpenAPI 文档
+    url: Optional[str] = None         # 或传 URL 拉取
+    mode: str = "merge"               # merge=合并现有工具 / replace=整表替换
+
+
+@router.post("/openapi/preview")
+async def openapi_preview(req: "OpenAPIRequest"):
+    """解析 OpenAPI 文档，预览生成的工具（不写 agent）。"""
+    doc = req.spec or (await openapi_factory.fetch_openapi(req.url) if req.url else None)
+    if not doc:
+        raise HTTPException(status_code=400, detail="需提供 spec 或 url")
+    try:
+        tools = openapi_factory.parse_openapi_doc(doc)
+    except openapi_factory.OpenAPIFactoryError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return {"success": True, "count": len(tools), "tools": tools}
+
+
+@router.post("/{agent_id}/openapi/apply")
+async def openapi_apply(agent_id: str, req: "OpenAPIRequest", user: User = Depends(require_developer)):
+    """解析 OpenAPI 并生成工具，应用到指定 agent（merge 或 replace）。"""
+    agent_id = valid_id(agent_id, "agent_id")
+    project_id = await _find_agent_project(agent_id)
+    doc = req.spec or (await openapi_factory.fetch_openapi(req.url) if req.url else None)
+    if not doc:
+        raise HTTPException(status_code=400, detail="需提供 spec 或 url")
+    try:
+        new_tools = openapi_factory.parse_openapi_doc(doc)
+    except openapi_factory.OpenAPIFactoryError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+    # 当前 toolsBuiltin（merge 模式保留现有，仅补新工具）
+    current = (await _proxy("GET", f"/api/projects/{project_id}/agents/{agent_id}/config")).get("config", {}).get("toolsBuiltin", []) or []
+    if req.mode == "merge":
+        current_names = {t["name"] for t in current if isinstance(t, dict)}
+        merged = list(current)
+        merged += [t for t in new_tools if t["name"] not in current_names]
+        target = merged
+    else:
+        target = new_tools
+
+    await _proxy(
+        "PUT",
+        f"/api/projects/{project_id}/agents/{agent_id}/config",
+        json={"config": {"toolsBuiltin": target}},
+    )
+    return {"success": True, "applied": len(new_tools), "total_tools": len(target), "mode": req.mode}

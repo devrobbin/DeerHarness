@@ -3,6 +3,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { apiGet, apiPost } from '@/lib/api';
 import { Markdown } from '@/components/Markdown';
+import { FlowGraph } from '@/components/agent-studio/FlowGraph';
 
 interface AgentItem {
   agentId: string;
@@ -29,6 +30,7 @@ interface TeamResult {
   status: string;
   team: string[];
   delegations: { tool: string; result: string }[];
+  thread_id?: string;
 }
 
 /**
@@ -282,6 +284,9 @@ export function TeamOrchestrator() {
               </p>
               <Markdown content={result.reply} />
             </div>
+
+            {/* 通信流可视化：本次 run 的 orchestrator→成员 分派图 */}
+            {result.thread_id && <FlowGraph threadId={result.thread_id} />}
           </>
         )}
         {error && <p className="text-center text-sm text-red-500">{error}</p>}
