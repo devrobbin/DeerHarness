@@ -45,7 +45,7 @@ DEERFLOW_COMPOSE_DIR = os.environ.get(
 # ---- 平台配置 ----
 CORS_ORIGINS = [
     origin.strip()
-    for origin in os.environ.get("CORS_ORIGINS", "http://localhost:3000").split(",")
+    for origin in os.environ.get("CORS_ORIGINS", "http://localhost:3002,http://localhost:3000").split(",")
     if origin.strip()
 ]
 # 管理员初始 API Key：启动时若用户库为空则自动播种

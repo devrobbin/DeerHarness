@@ -20,7 +20,7 @@ echo "🚀 启动 DeerHarness Gateway (http://localhost:${GATEWAY_PORT:-8080}) .
 GATEWAY_PID=$!
 
 # 2. 启动 Web（端口 3000）
-echo "🌐 启动 DeerHarness Web (http://localhost:${WEB_PORT:-3000}) ..."
+echo "🌐 启动 DeerHarness Web (http://localhost:${WEB_PORT:-3002}) ..."
 (cd web && npm install -q && npm run dev) &
 WEB_PID=$!
 
