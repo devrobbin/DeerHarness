@@ -52,12 +52,8 @@ interface EvolveTask {
   max_rounds: number;
 }
 
-const EVOLVE_STATUS: Record<string, { text: string; color: 'green' | 'red' | 'gray' | 'purple' | 'amber' }> = {
-  running: { text: '运行中', color: 'purple' },
-  waiting_approval: { text: '待审批', color: 'amber' },
-  success: { text: '成功', color: 'green' },
-  stopped: { text: '已停止', color: 'gray' },
-  failed: { text: '失败', color: 'red' },
+const EVOLVE_COLORS: Record<string, 'green' | 'red' | 'gray' | 'purple' | 'amber'> = {
+  running: 'purple', waiting_approval: 'amber', success: 'green', stopped: 'gray', failed: 'red',
 };
 
 function traceType(agentId: string): 'chat' | 'team' | 'evolve' | 'other' {
@@ -179,8 +175,9 @@ export default function MonitorPage() {
             <p className="mb-1.5 text-xs text-gray-500 dark:text-gray-400">🧬 进化任务</p>
             <div className="flex flex-wrap gap-1.5 text-xs">
               {Object.entries(evolveStats).map(([s, n]) => {
-                const b = EVOLVE_STATUS[s] ?? { text: s, color: 'gray' as const };
-                return <Badge key={s} color={b.color}>{b.text} {n}</Badge>;
+                const text = (t.monitor.evolveStatus as Record<string, string>)[s] ?? s;
+                const color = EVOLVE_COLORS[s] ?? 'gray';
+                return <Badge key={s} color={color}>{text} {n}</Badge>;
               })}
               {evolveTasks.length === 0 && <span className="text-gray-400">暂无</span>}
             </div>
@@ -212,12 +209,13 @@ export default function MonitorPage() {
           <h2 className="mb-3 font-semibold dark:text-gray-100">{t.monitor.evolution}</h2>
           <div className="max-h-56 space-y-1.5 overflow-y-auto">
             {evolveTasks.slice(0, 8).map(task => {
-              const b = EVOLVE_STATUS[task.status] ?? { text: task.status, color: 'gray' as const };
+              const text = (t.monitor.evolveStatus as Record<string, string>)[task.status] ?? task.status;
+              const color = EVOLVE_COLORS[task.status] ?? 'gray';
               return (
                 <div key={task.task_id} className="rounded border border-gray-100 p-1.5 text-xs dark:border-gray-700">
                   <div className="flex items-center justify-between">
                     <span className="truncate text-gray-700 dark:text-gray-200">{task.target}</span>
-                    <Badge color={b.color}>{b.text}</Badge>
+                    <Badge color={color}>{text}</Badge>
                   </div>
                   <p className="text-[11px] text-gray-400">
                     第 {task.current_round}/{task.max_rounds} 轮 · 最新 {task.last_avg_score ?? '—'} 分

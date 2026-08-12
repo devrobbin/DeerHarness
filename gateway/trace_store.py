@@ -18,13 +18,28 @@ _lock = threading.Lock()
 _conn: sqlite3.Connection | None = None
 
 
+_SCHEMA_VERSION = 1
+
+
+def _migrate(conn: sqlite3.Connection) -> None:
+    """基于 PRAGMA user_version 的顺序迁移链（评审：占位标记 → 可演进）。"""
+    version = conn.execute("PRAGMA user_version").fetchone()[0]
+    # 示例：未来加列时在此追加
+    # if version < 2:
+    #     conn.execute("ALTER TABLE traces ADD COLUMN ...")
+    #     version = 2
+    if version < _SCHEMA_VERSION:
+        conn.execute(f"PRAGMA user_version={_SCHEMA_VERSION}")
+    conn.commit()
+
+
 def _get_conn() -> sqlite3.Connection:
     global _conn
     if _conn is None:
         os.makedirs(os.path.dirname(_DB_FILE), exist_ok=True)
         _conn = sqlite3.connect(_DB_FILE, check_same_thread=False, timeout=30)
         _conn.execute("PRAGMA journal_mode=WAL")
-        _conn.execute("PRAGMA user_version=1")
+        _migrate(_conn)
         _conn.execute(
             """
             CREATE TABLE IF NOT EXISTS traces (

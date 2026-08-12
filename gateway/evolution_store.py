@@ -96,6 +96,18 @@ def init_db():
 _initialized = False
 
 
+_SCHEMA_VERSION = 1
+
+
+def _migrate(conn) -> None:
+    """基于 user_version 的顺序迁移链（评审：占位标记 → 可演进）。"""
+    version = conn.execute("PRAGMA user_version").fetchone()[0]
+    # 未来加表/加列在此追加 if version < N 分支
+    if version < _SCHEMA_VERSION:
+        conn.execute(f"PRAGMA user_version={_SCHEMA_VERSION}")
+    conn.commit()
+
+
 def _migrate_legacy_nulls(conn):
     """迁移旧数据：历史 soul/成员覆盖的 workflow_id=NULL → ''（哨兵化）。"""
     try:
@@ -116,6 +128,7 @@ def _ensure_initialized():
             try:
                 conn.executescript(_SCHEMA)
                 _migrate_legacy_nulls(conn)
+                _migrate(conn)
             finally:
                 conn.close()
             _initialized = True

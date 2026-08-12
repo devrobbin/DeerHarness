@@ -1236,6 +1236,7 @@ async def fusion_team_run(req: FusionTeamRunRequest, user: User = Depends(requir
 
         deadline = time.monotonic() + POLL_TIMEOUT
         status = "pending"
+        detail: dict = {}
         while status in ("pending", "running", "queued"):
             if time.monotonic() > deadline:
                 raise HTTPException(status_code=504, detail="团队任务超时")
@@ -1254,7 +1255,7 @@ async def fusion_team_run(req: FusionTeamRunRequest, user: User = Depends(requir
         state = await _proxy_df("GET", f"/api/threads/{thread_id}/state")
         reply = _extract_ai_reply(state)
         delegation = _extract_delegations(state)
-        # 观测闭环（评审 C）：记录轨迹 + 分派统计
+        # 观测闭环（评审 C）：记录轨迹 + 分派统计 + 真实 token 成本
         record_trace(
             "dh-team",
             "success",
@@ -1264,6 +1265,7 @@ async def fusion_team_run(req: FusionTeamRunRequest, user: User = Depends(requir
             delegations_failed=sum(
                 1 for d in delegation if "failed" in d.get("result", "").lower()
             ),
+            cost=_estimate_run_cost(detail) if isinstance(detail, dict) else 0.0,
         )
         return {
             "reply": reply,
