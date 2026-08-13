@@ -120,6 +120,19 @@ _BUILTIN_BENCHMARKS: dict[str, list[dict]] = {
             ),
         },
         {
+            "id": "AMZ-002-acos",
+            "title": "SP ACoS 定量诊断（G1-G7）",
+            "statement": (
+                "某商品 SP 广告诊断：广告订单均价 AOV=$30，单件变动成本 VC=$20，"
+                "每单要求保留利润 $3，参考 CVR=10%，当前窗口 Spend=$120，Sales=$300，"
+                "Clicks=35，Orders=10。请按 SP ACoS 定量判断线路图给出完整诊断："
+                "1) G1 数据就绪判定；2) 计算盈亏平衡 ACoS、目标 ACoS、最大 CPC、"
+                "允许花费、可避免浪费并给出公式推导；3) 用 G2 判定结果码"
+                "（PROTECT/OPTIMIZE/LOSS_CONTROL）；4) 给推荐动作草案（含调幅护栏）"
+                "与预算去向、回读计划。要求数值计算正确、结果码明确。"
+            ),
+        },
+        {
             "id": "TT-001-sourcing",
             "title": "TikTok Shop 选品标准",
             "statement": (

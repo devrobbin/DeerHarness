@@ -116,7 +116,7 @@ async def _resolve_evolution_target(task: dict) -> tuple[str, list[dict], bool]:
         agent_id = task["agent_id"]
         project_id = await _find_agent_project(agent_id)
         runner = await _sync_agent(agent_id, project_id)  # dh-<agent>
-        cases = _builtin_cases(_GENERIC_CASE_IDS + ["AMZ-001-listing"])
+        cases = _builtin_cases(_GENERIC_CASE_IDS + ["AMZ-001-listing", "AMZ-002-acos"])
         return runner, cases, False
 
     # workflow / team：同步团队 + 主代理
