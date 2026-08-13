@@ -197,7 +197,7 @@ async def _propose_improvement(
     """LLM 生成结构化改进方案；无 key / 无低分项 / 命中禁入领域 → None。"""
     if not config.DEEPSEEK_API_KEY:
         return None
-    low = [c for c in scored if c.get("score", 0) < 60]
+    low = [c for c in scored if c.get("score", 0) < 70]
     if not low:
         return {"target": "none", "reason": "全部用例得分良好，无需改进"}
     lines = "\n".join(
