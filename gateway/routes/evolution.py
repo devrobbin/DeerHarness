@@ -55,11 +55,11 @@ _EST_SCORE_COST = 0.001
 
 # 团队专属评测用例（工作流 task 本身也是评测语句）
 _TEAM_CASES: dict[str, list[str]] = {
-    "amazon-ops": ["AMZ-001-listing"],
+    "amazon-ops": ["AMZ-001-listing", "AMZ-002-acos"],
     "tiktok-shop": ["TT-001-sourcing"],
-    "content-studio": ["AMZ-001-listing"],
-    "crossborder-ops": ["AMZ-001-listing", "TT-001-sourcing"],
-    "ops-support": [],
+    "content-studio": ["CS-001-short-video", "CS-002-listing-copy", "AMZ-001-listing"],
+    "crossborder-ops": ["XB-001-daily-inspection", "AMZ-001-listing", "TT-001-sourcing"],
+    "ops-support": ["OPS-001-logistics", "OPS-002-tax-rebate"],
 }
 
 _GENERIC_CASE_IDS = ["DH-001-summary", "DH-003-json"]
@@ -175,11 +175,15 @@ async def _run_team_case(deerflow_agent: str, statement: str) -> tuple[str, str,
         status = result.get("status", "success")
         if status in ("failed", "error", "cancelled", "timeout"):
             return f"(run 状态: {status})", status, 0.0
+        detail = result.get("_detail") or {}
+        # DeerFlow 2.X：子代理触发 token_budget 硬顶 → 结果受预算截断，显式暴露给进化护栏
+        if (detail.get("subagent_stop_reason") == "token_capped"
+                or result.get("subagent_stop_reason") == "token_capped"):
+            return "(token 预算触顶，结果被截断)", "token_capped", _estimate_run_cost(detail)
         state = result.get("state")
         if not state:
             state = await _proxy_df("GET", f"/api/threads/{thread_id}/state")
         cost = 0.0
-        detail = result.get("_detail")
         if detail:
             cost = _estimate_run_cost(detail)
         return _extract_ai_reply(state), status, cost
@@ -277,12 +281,13 @@ async def _apply_proposal(task_id: str, proposal: dict) -> None:
     target = proposal.get("target", "")
     reason = proposal.get("reason", "")[:200]
     new_text = proposal.get("new_text", "")
+    override_version: Optional[int] = None
     if target == "workflow_task":
-        v = store.set_override(task["team_id"], task["workflow_id"], "workflow_task", "", new_text)
-        summary = f"工作流模板 v{v}：{reason}"
+        override_version = store.set_override(task["team_id"], task["workflow_id"], "workflow_task", "", new_text)
+        summary = f"工作流模板 v{override_version}：{reason}"
     elif target == "soul":
-        v = store.set_override(task["team_id"], None, "soul", "", new_text)
-        summary = f"主代理 soul v{v}：{reason}"
+        override_version = store.set_override(task["team_id"], None, "soul", "", new_text)
+        summary = f"主代理 soul v{override_version}：{reason}"
     elif target == "member_prompt":
         member = proposal.get("member_id", "") or task["agent_id"] or ""
         if task["target_type"] == "agent":
@@ -296,10 +301,12 @@ async def _apply_proposal(task_id: str, proposal: dict) -> None:
             )
             summary = f"Agent 人设 {member}：{reason}"
         else:
-            v = store.set_override(task["team_id"], None, "member_prompt", member, new_text)
-            summary = f"成员人设 {member} v{v}：{reason}"
+            override_version = store.set_override(task["team_id"], None, "member_prompt", member, new_text)
+            summary = f"成员人设 {member} v{override_version}：{reason}"
     else:
         summary = "无改进"
+    # 记录 override 版本号（用于回滚定位历史值）
+    proposal = {**proposal, "_override_version": override_version}
     store.record_version(
         task_id, task["current_round"], None, summary,
         {"target": target, "proposal": proposal},
@@ -339,6 +346,8 @@ async def _advance_inner(task_id: str) -> None:
     max_cost = float(safety.get("max_cost_per_evolution", 5.0))
     require_approval = bool(safety.get("require_human_approval", True))
     blocked = safety.get("blocked_domains", []) or []
+    # DeerFlow 2.X token_budget 硬顶护栏（可选）：子代理触顶即视为预算护栏触发
+    token_budget_enabled = bool(safety.get("evolution_token_budget"))
 
     round_no = task["current_round"] + 1
     if round_no > max_rounds:
@@ -370,6 +379,15 @@ async def _advance_inner(task_id: str) -> None:
             "_case_cost": case_cost,
         })
         cost += case_cost
+        # DeerFlow 2.X token_budget 护栏：单轮任一 case 子代理触顶 → 提前停止，
+        # 避免截断结果被误判为达标（成本护栏触发）
+        if token_budget_enabled and status == "token_capped":
+            store.update_task(task_id, cost=round(cost, 6), status="stopped")
+            await _publish(task_id, "evolution_done", {
+                "status": "stopped",
+                "reason": f"子代理 token 预算触顶（{case['id']}）",
+            })
+            return
 
     # 2. 评分
     scored = await _score_replies([{k: r[k] for k in ("id", "title", "statement", "reply")} for r in results])
@@ -592,6 +610,64 @@ async def evolution_reject(task_id: str, req: ApprovalRequest, user: User = Depe
     store.update_task(task_id, status="running")
     asyncio.create_task(_advance(task_id))
     return {"success": True}
+
+
+class RollbackRequest(BaseModel):
+    version: int
+
+
+@router.post("/tasks/{task_id}/rollback")
+async def evolution_rollback(task_id: str, req: RollbackRequest, user: User = Depends(require_admin)):
+    """回滚到指定版本：撤销该版本应用的改进，恢复之前生效的配置值。
+
+    - 取目标版本快照中的 proposal（target / member_id / _override_version）。
+    - 用 override_history 找该配置键在 _override_version 之前的最后值写回；
+      若无历史（覆盖从未改过）→ 删除覆盖，回退基础模板。
+    - 记录新版本 + trace + WS 推送。
+    """
+    task = store.get_task(task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="进化任务不存在")
+    versions = store.list_versions(task_id)
+    target = next((v for v in versions if v["version"] == req.version), None)
+    if not target:
+        raise HTTPException(status_code=400, detail=f"版本 {req.version} 不存在")
+    snapshot = target.get("snapshot") or {}
+    proposal = (snapshot.get("proposal") or {}) if isinstance(snapshot, dict) else {}
+    tgt = proposal.get("target", "")
+    if tgt not in ("workflow_task", "soul", "member_prompt"):
+        raise HTTPException(status_code=400, detail="该版本无可回滚的配置改进")
+
+    # field 推导（与 _apply_proposal 一致）
+    if tgt == "workflow_task":
+        field, wf, member = "workflow_task", task["workflow_id"], ""
+    elif tgt == "soul":
+        field, wf, member = "soul", None, ""
+    else:
+        member = proposal.get("member_id", "") or task["agent_id"] or ""
+        field, wf, member = "member_prompt", None, member
+
+    before_version = int(proposal.get("_override_version") or 0)
+    old = store.get_override_before_version(
+        task["team_id"], field, member, before_version=before_version, workflow_id=wf
+    )
+    if old is None:
+        store.delete_override(task["team_id"], wf, field, member)
+        summary = f"回滚到 v{req.version}：恢复基础模板（{tgt}）"
+    else:
+        v = store.set_override(task["team_id"], wf, field, member, old, action="rollback")
+        summary = f"回滚到 v{req.version}：恢复 {tgt} 此前值（v{v}）"
+    store.record_version(
+        task_id, task["current_round"], None, summary,
+        {"target": tgt, "rollback": True, "to_version": req.version, "proposal": proposal},
+    )
+    await _publish(task_id, "proposal_rolled_back", {"to_version": req.version, "summary": summary})
+    record_trace(
+        f"evolve:{task_id}", "success",
+        task_goal=f"回滚[{tgt}] {task['team_id']} 至 v{req.version}",
+        meta_summary=summary,
+    )
+    return {"success": True, "summary": summary}
 
 
 @router.post("/tasks/{task_id}/stop")

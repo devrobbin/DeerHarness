@@ -70,6 +70,17 @@ CREATE TABLE IF NOT EXISTS config_overrides (
     applied_at REAL,
     UNIQUE(team_id, workflow_id, field, member_id)
 );
+CREATE TABLE IF NOT EXISTS override_history (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    team_id TEXT NOT NULL,
+    workflow_id TEXT NOT NULL DEFAULT '',
+    field TEXT NOT NULL,
+    member_id TEXT NOT NULL DEFAULT '',
+    version INTEGER NOT NULL,
+    value TEXT NOT NULL,
+    applied_at REAL,
+    action TEXT NOT NULL DEFAULT 'set'   -- set / rollback
+);
 """
 
 
@@ -288,21 +299,29 @@ def set_approval_status(approval_id: int, status: str) -> bool:
 
 
 def set_override(team_id: str, workflow_id: Optional[str], field: str,
-                 member_id: str, value: str) -> int:
+                 member_id: str, value: str, *, action: str = "set") -> int:
     """写入配置覆盖，返回新版本号。workflow_id=None + field=soul = 团队主代理覆盖。
 
     哨兵约定：workflow_id 用 '' 而非 NULL —— SQLite UNIQUE 约束对 NULL 互不相等，
     会导致 soul 等无 workflow 的覆盖二次写入永远插新行、读取永远命中旧值。
+
+    每次写入前把旧值（若有）记入 override_history，保证可回滚可追溯。
     """
     wf = workflow_id or ""
     with _lock:
         conn = _connect()
         try:
             row = conn.execute(
-                "SELECT version FROM config_overrides WHERE team_id=? AND workflow_id=? AND field=? AND member_id=?",
+                "SELECT version, value FROM config_overrides WHERE team_id=? AND workflow_id=? AND field=? AND member_id=?",
                 (team_id, wf, field, member_id),
             ).fetchone()
             version = (row["version"] + 1) if row else 1
+            if row and row["value"] != value:
+                conn.execute(
+                    "INSERT INTO override_history (team_id, workflow_id, field, member_id, version, value, applied_at, action)"
+                    " VALUES (?,?,?,?,?,?,?,?)",
+                    (team_id, wf, field, member_id, version - 1, row["value"], time.time(), "set"),
+                )
             conn.execute(
                 "INSERT INTO config_overrides (team_id, workflow_id, field, member_id, value, version, applied_at)"
                 " VALUES (?,?,?,?,?,?,?)"
@@ -329,6 +348,76 @@ def get_override(team_id: str, workflow_id: Optional[str], field: str,
         return row["value"] if row else None
     finally:
         conn.close()
+
+
+def list_override_history(team_id: str, field: str, member_id: str = "",
+                          workflow_id: Optional[str] = None) -> list[dict]:
+    """列出某配置键的历史变更（version 升序），供回滚定位。
+
+    workflow_id 传入实际值（workflow_task 覆盖的 workflow_id 非空）；
+    未传默认 ''（soul / member_prompt 等团队级覆盖）。
+    """
+    wf = workflow_id or ""
+    conn = _connect()
+    try:
+        rows = conn.execute(
+            "SELECT version, value, action, applied_at FROM override_history"
+            " WHERE team_id=? AND workflow_id=? AND field=? AND member_id=?"
+            " ORDER BY version ASC",
+            (team_id, wf, field, member_id),
+        ).fetchall()
+        return [dict(r) for r in rows]
+    finally:
+        conn.close()
+
+
+def get_override_before_version(team_id: str, field: str, member_id: str = "",
+                                before_version: int = 0,
+                                workflow_id: Optional[str] = None) -> Optional[str]:
+    """回滚到目标版本：返回该配置键在目标版本之前最后一次生效的值。
+
+    override_history 记录了每次 set 之前的旧值（version = 旧版本号）。
+    回滚到版本 V = 取 history 中 version < V 的最新一条 value；
+    若没有历史（覆盖从未改过）返回 None（表示回退到基础模板，调用方删除覆盖）。
+    """
+    wf = workflow_id or ""
+    conn = _connect()
+    try:
+        row = conn.execute(
+            "SELECT value FROM override_history"
+            " WHERE team_id=? AND workflow_id=? AND field=? AND member_id=? AND version < ?"
+            " ORDER BY version DESC LIMIT 1",
+            (team_id, wf, field, member_id, before_version),
+        ).fetchone()
+        return row["value"] if row else None
+    finally:
+        conn.close()
+
+
+def delete_override(team_id: str, workflow_id: Optional[str], field: str,
+                    member_id: str = "") -> None:
+    """删除配置覆盖（回滚到基础模板）。"""
+    wf = workflow_id or ""
+    with _lock:
+        conn = _connect()
+        try:
+            row = conn.execute(
+                "SELECT value FROM config_overrides WHERE team_id=? AND workflow_id=? AND field=? AND member_id=?",
+                (team_id, wf, field, member_id),
+            ).fetchone()
+            if row:
+                conn.execute(
+                    "INSERT INTO override_history (team_id, workflow_id, field, member_id, version, value, applied_at, action)"
+                    " VALUES (?,?,?,?,?,?,?,?)",
+                    (team_id, wf, field, member_id, 0, row["value"], time.time(), "rollback"),
+                )
+                conn.execute(
+                    "DELETE FROM config_overrides WHERE team_id=? AND workflow_id=? AND field=? AND member_id=?",
+                    (team_id, wf, field, member_id),
+                )
+                conn.commit()
+        finally:
+            conn.close()
 
 
 def get_effective_workflow_task(team_id: str, workflow_id: str, base_task: str) -> str:

@@ -2,10 +2,10 @@
 
 | 项 | 值 |
 |---|---|
-| **版本** | v1.1.0 |
+| **版本** | v1.2.0 |
 | **更新时间** | 2026-09-10 |
-| **关联 ADR** | ADR-0008 |
-| **变更摘要** | P1 三项全部落地（/runs/wait、managed-subagent API 双轨、PAT scope 模板） |
+| **关联 ADR** | ADR-0009 |
+| **变更摘要** | P2 全部落地：评测用例扩充、token_budget 护栏、版本回滚 |
 
 ## 已完成（Phase 1-8，README 记录）
 
@@ -21,14 +21,11 @@
 | **P1：/runs/wait 完整语义** | ✅ 落地 | wait 优先 + 轮询回退（chat/fusion/evolution） |
 | **P1：managed-subagent API 双轨** | ✅ 落地 | `/api/subagents` 优先，config 写入回退 |
 | **P1：PAT 最小授权模板** | ✅ 落地 | scope：threads:read / runs:create / runs:read |
+| **P2：团队专属评测用例扩充** | ✅ 落地 | 5 团队全覆盖（CS/XB/OPS 新增） |
+| **P2：token_budget 进化护栏** | ✅ 落地 | `evolution_token_budget` + token_capped 提前停止 |
+| **P2：版本回滚 API + 前端** | ✅ 落地 | `POST /tasks/{id}/rollback` + ScoreChart 按钮 |
 
 ## 规划（按优先级）
-
-### P2：进化能力增强
-
-- [ ] 团队级专属评测用例扩充（content-studio / crossborder-ops / ops-support）。
-- [ ] token_budget 作为进化成本护栏的真实信号（对接 2.X subagent token 预算）。
-- [ ] 进化版本回滚 API + 前端一键回滚。
 
 ### P3：团队模板资产化
 
@@ -48,7 +45,8 @@
 |---|---|
 | v0.7.0 | 产品设计文档体系 v1.0.0 建立 |
 | v0.7.x | P1 融合桥 2.X 深度对齐（文档 v1.1.0） |
-| v0.8.0（规划） | P2 进化增强 |
+| v0.7.x | P2 进化增强（文档 v1.2.0） |
+| v0.8.0（规划） | P3 团队模板资产化 |
 
 ## 相关文档
 

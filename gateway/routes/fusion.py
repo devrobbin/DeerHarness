@@ -141,6 +141,58 @@ _BUILTIN_BENCHMARKS: dict[str, list[dict]] = {
                 "用 Markdown 输出，结论明确。"
             ),
         },
+        {
+            "id": "CS-001-short-video",
+            "title": "短视频脚本（内容工厂）",
+            "statement": (
+                "为「便携式电动奶泡器」产出 1 条 15-30 秒 TikTok 短视频脚本：\n"
+                "1. 前 3 秒钩子（吸引停留）；2. 口播文案（含卖点）；3. 画面分镜要点；"
+                "4. CTA（挂车/搜索词）。\n"
+                "输出：可直接拍摄的脚本卡，中文或英文均可，结构完整。"
+            ),
+        },
+        {
+            "id": "CS-002-listing-copy",
+            "title": "商品页文案（内容工厂）",
+            "statement": (
+                "为「USB 充电便携电动奶泡器（304 不锈钢）」产出商品页文案：\n"
+                "1. 标题（前端关键词优先，≤200 字符）；2. 五点描述（卖点结构化，每条 ≤200 字符）；"
+                "3. Search Terms 关键词组（≤250 字节）。\n"
+                "输出：可直接提交的文案稿，英文。"
+            ),
+        },
+        {
+            "id": "XB-001-daily-inspection",
+            "title": "日常运营巡检待办（跨境总监）",
+            "statement": (
+                "对当前店铺做一次日常运营巡检并输出今日待办清单：\n"
+                "1. Amazon：listing 状态、Buy Box、广告账户余额与异常、库存告警、待处理客服（含 A-to-Z）；\n"
+                "2. TikTok Shop：在售商品卡规范、达人合作进度、内容发布计划执行情况；\n"
+                "3. 合规红线检查与物流在途异常。\n"
+                "输出：按优先级排序的待办清单 + 每项负责人建议。"
+            ),
+        },
+        {
+            "id": "OPS-001-logistics",
+            "title": "物流方案（履约财税）",
+            "statement": (
+                "为指定 SKU 制定物流方案：\n"
+                "1. 渠道对比（快船/慢船/空运/海外仓）的时效与成本；"
+                "2. 头程 + 尾程组合、补货批次与在途跟踪；"
+                "3. 风险预案（旺季延误、关税变动）。\n"
+                "输出：物流方案表（含费用测算）。"
+            ),
+        },
+        {
+            "id": "OPS-002-tax-rebate",
+            "title": "出口退税核算（履约财税）",
+            "statement": (
+                "核算近期一批出口退税：\n"
+                "1. 适用退税率与征退差计算；2. 单证要求（报关单/发票/结汇）与流程节点；"
+                "3. 风险点（逾期申报、单证不符）。\n"
+                "输出：退税核算表 + 操作指引。"
+            ),
+        },
     ],
 }
 
@@ -1028,11 +1080,15 @@ async def _run_case(deerflow_agent: str, statement: str) -> tuple[str, str, floa
         status = result.get("status", "success")
         if status in ("failed", "error", "cancelled", "timeout"):
             return f"(run 状态: {status})", status, 0.0
+        detail = result.get("_detail") or {}
+        # DeerFlow 2.X：子代理触发 token_budget 硬顶 → 结果受预算截断，显式暴露给进化护栏
+        if (detail.get("subagent_stop_reason") == "token_capped"
+                or result.get("subagent_stop_reason") == "token_capped"):
+            return "(token 预算触顶，结果被截断)", "token_capped", _estimate_run_cost(detail)
         state = result.get("state")
         if not state:
             state = await _proxy_df("GET", f"/api/threads/{thread_id}/state")
         cost = 0.0
-        detail = result.get("_detail")
         if detail:
             cost = _estimate_run_cost(detail)
         return _extract_ai_reply(state), status, cost

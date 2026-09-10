@@ -7,6 +7,24 @@
 
 ---
 
+## 2026-09-10 · v1.2.0 · 路线图 P2：进化能力增强
+
+**变更摘要**
+- **P2-1 团队专属评测用例扩充**：`_BUILTIN_BENCHMARKS` 新增 5 个团队专属用例（CS-001 短视频脚本、CS-002 商品页文案、XB-001 日常巡检、OPS-001 物流方案、OPS-002 退税核算）；`_TEAM_CASES` 全部 5 团队均有专属用例（含 amazon-ops 补 AMZ-002-acos）。
+- **P2-2 token_budget 成本护栏**：安全设置新增 `evolution_token_budget`（DeerFlow 2.X 子代理 token 硬顶，可选）；`run_and_wait` 透传 `subagent_stop_reason`；`_run_case`/`_run_team_case` 在触发 `token_capped` 时返回 `token_capped` 状态；进化单轮任一 case 触顶即提前停止，避免截断结果误判达标。
+- **P2-3 版本回滚**：`evolution_store.py` 新增 `override_history` 表 + `set_override` 记录旧值 + `get_override_before_version`/`delete_override`；`POST /api/evolution/tasks/{id}/rollback`（admin，恢复目标版本前值或回退基础模板）；前端 ScoreChart 每版本行加"回滚"按钮。新增 4 项单测（`test_evolution_store.py`）。
+
+**影响的文档**
+- [05-进化引擎](05-evolution.md) v1.1.0
+- [06-团队模板](06-team-templates.md) v1.1.0
+- [07-安全与护栏](07-safety.md) v1.2.0
+- [08-路线图](08-roadmap.md) v1.2.0
+
+**ADR**
+- [ADR-0009 版本回滚](./ADR/ADR-0009-rollback.md)
+
+---
+
 ## 2026-09-10 · v1.1.0 · 路线图 P1：融合桥 2.X 深度对齐
 
 **变更摘要**

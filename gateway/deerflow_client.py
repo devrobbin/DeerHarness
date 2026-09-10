@@ -150,12 +150,23 @@ class DeerFlowClient:
         if resp is not None and resp.status_code == 200:
             data = resp.json()
             # /runs/wait 完成 → final state（含 messages）；store-back 覆盖 → status/error
+            stop_reason = data.get("subagent_stop_reason") if isinstance(data, dict) else None
             if isinstance(data, dict) and data.get("messages") is not None:
-                return {"state": data, "status": data.get("status", "success"), "run_id": data.get("run_id")}
+                return {
+                    "state": data,
+                    "status": data.get("status", "success"),
+                    "run_id": data.get("run_id"),
+                    "subagent_stop_reason": stop_reason,
+                }
             if isinstance(data, dict) and data.get("status"):
                 # 终态（success/failed/error/cancelled）直接返回；仍运行中才回退轮询
                 if data["status"] not in ("pending", "running", "queued"):
-                    return {"state": None, "status": data["status"], "run_id": data.get("run_id")}
+                    return {
+                        "state": None,
+                        "status": data["status"],
+                        "run_id": data.get("run_id"),
+                        "subagent_stop_reason": stop_reason,
+                    }
             # 其余情况（空 state / 未知形态）→ 回退轮询
         # 回退：创建 + 轮询（兼容旧版无 /runs/wait）
         resp = await self.request(
@@ -179,7 +190,13 @@ class DeerFlowClient:
                 raise DeerFlowError(f"deerflow 轮询 run 失败 ({resp.status_code}): {resp.text[:200]}")
             detail = resp.json()
             status = detail.get("status", status)
-        return {"state": None, "status": status, "run_id": run_id, "_detail": detail}
+        return {
+            "state": None,
+            "status": status,
+            "run_id": run_id,
+            "_detail": detail,
+            "subagent_stop_reason": detail.get("subagent_stop_reason"),
+        }
 
     async def aclose(self) -> None:
         await self._client.aclose()

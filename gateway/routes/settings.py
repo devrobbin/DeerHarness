@@ -52,6 +52,7 @@ def _load_config() -> dict:
             "max_cost_per_evolution": 5.0,
             "require_human_approval": True,
             "blocked_domains": [],
+            "evolution_token_budget": None,
         },
     }
 
@@ -414,6 +415,10 @@ class SafetyConfig(BaseModel):
     max_cost_per_evolution: float = 5.0
     require_human_approval: bool = True
     blocked_domains: list[str] = []
+    # DeerFlow 2.X subagent token_budget 信号：单轮子代理 token 硬顶（可选，None=不限）。
+    # 触顶（subagent_stop_reason=token_capped）时该轮评测结果视为受预算截断，
+    # 进化按"成本护栏触发"提前停止，避免截断结果被误判为达标。
+    evolution_token_budget: Optional[int] = None
 
 
 @router.get("/safety")

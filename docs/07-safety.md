@@ -2,10 +2,10 @@
 
 | 项 | 值 |
 |---|---|
-| **版本** | v1.1.0 |
+| **版本** | v1.2.0 |
 | **更新时间** | 2026-09-10 |
 | **关联 ADR** | ADR-0004、ADR-0007 |
-| **变更摘要** | P1 落地：PAT 最小授权 scope 明确为 threads:read / runs:create / runs:read（可按需加 runs:cancel / threads:write） |
+| **变更摘要** | P2 落地：新增进化护栏 evolution_token_budget（DeerFlow 2.X 子代理 token 硬顶信号） |
 
 ## 分层安全模型
 
@@ -30,8 +30,9 @@
 |---|---|---|
 | 请求级对话预算（近 1h 累计） | `MAX_COST_PER_REQUEST` | $2.0（0=不限） |
 | 进化单任务成本上限 | `max_cost_per_evolution` | $5.0 |
+| **进化子代理 token 预算（DeerFlow 2.X）** | `evolution_token_budget` | None（不限） |
 | 真实 token 计价 | `MODEL_INPUT_PRICE_PER_M` / `MODEL_OUTPUT_PRICE_PER_M` | $0.27 / $1.10 |
-| DeerFlow 2.X token_budget 硬顶 | `subagent_stop_reason=token_capped` 信号 | 接入中 |
+| DeerFlow 2.X token_budget 硬顶 | `subagent_stop_reason=token_capped` 信号 | 接入 |
 
 ### 4. 进化安全策略（Settings → Safety）
 

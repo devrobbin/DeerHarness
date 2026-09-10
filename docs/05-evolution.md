@@ -2,10 +2,10 @@
 
 | 项 | 值 |
 |---|---|
-| **版本** | v1.0.0 |
+| **版本** | v1.1.0 |
 | **更新时间** | 2026-09-10 |
-| **关联 ADR** | ADR-0005 |
-| **变更摘要** | 初始成稿：三层进化闭环 + 审批 + 护栏 + 验证轮 |
+| **关联 ADR** | ADR-0005、ADR-0009 |
+| **变更摘要** | P2 落地：团队专属评测用例扩充；token_budget 成本护栏（evolution_token_budget）；版本回滚 API + 前端一键回滚 |
 
 ## 定位
 
@@ -48,6 +48,13 @@
 - 每版本保存配置快照（`evolution_versions`），可追溯、可回滚（ScoreChart 版本对比数据源）。
 - agent 型进化直接写回 penguin agent config（下次 `_sync_agent` 同步生效）。
 
+### 版本回滚（P2）
+
+- `POST /tasks/{id}/rollback` `{version}`：撤销指定版本应用的改进，恢复该配置键在此前生效的值（admin）。
+- 存储层 `override_history` 记录每次写入前的旧值（含 action: set / rollback），`get_override_before_version` 定位目标版本前的值。
+- 有历史值 → 写回（新版本号）；无历史（覆盖从未改过）→ 删除覆盖，回退基础模板。
+- 前端 ScoreChart 每版本行提供"回滚"按钮，回滚后版本列表自动刷新。
+
 ### 护栏（从安全设置读取）
 
 | 护栏 | 配置项 | 默认 |
@@ -56,8 +63,11 @@
 | 单任务成本上限 | `max_cost_per_evolution` | $5.0 |
 | 人工审批门 | `require_human_approval` | true |
 | 禁入领域 | `blocked_domains` | [] |
+| **子代理 token 预算（DeerFlow 2.X）** | `evolution_token_budget` | None（不限） |
 
 成本按真实 token 计价（`_estimate_run_cost`）+ 每轮估算增量（case 执行 + 评分）；DeerFlow 2.X `token_capped` 信号计入成本。轮次/成本超限即 `stopped`。
+
+**token_budget 护栏（P2）**：启用 `evolution_token_budget` 后，单轮任一 case 触发 `subagent_stop_reason=token_capped`（2.X 子代理 token 硬顶）即提前停止，避免被截断结果被误判为达标。
 
 ## 状态机
 
@@ -76,7 +86,12 @@ running ──→ waiting_approval（有方案待批）
 ## 评测用例
 
 - 通用内置集：`dh-benchmark`（信息摘要 / Markdown 格式 / JSON 输出 / Amazon listing / ACoS / TikTok 选品）。
-- 团队专属：`_TEAM_CASES` 按团队映射（amazon-ops / tiktok-shop / content-studio / crossborder-ops）。
+- 团队专属（P2 扩充）：`_TEAM_CASES` 按团队映射——
+  - amazon-ops：AMZ-001-listing、AMZ-002-acos
+  - tiktok-shop：TT-001-sourcing
+  - content-studio：CS-001-short-video、CS-002-listing-copy、AMZ-001-listing
+  - crossborder-ops：XB-001-daily-inspection、AMZ-001-listing、TT-001-sourcing
+  - ops-support：OPS-001-logistics、OPS-002-tax-rebate
 - workflow 级：工作流 task 本身即评测语句。
 
 ## 相关文档
@@ -84,4 +99,4 @@ running ──→ waiting_approval（有方案待批）
 - 产品形态：[02-产品设计](02-product.md)
 - 融合执行：[04-融合桥契约](04-fusion-contract.md)
 - 安全护栏：[07-安全与护栏](07-safety.md)
-- 决策：[ADR-0005](./ADR/ADR-0005-evolution-loop.md)
+- 决策：[ADR-0005](./ADR/ADR-0005-evolution-loop.md)、[ADR-0009](./ADR/ADR-0009-rollback.md)
