@@ -7,6 +7,27 @@
 
 ---
 
+## 2026-09-10 · v1.4.0 · 路线图 P4/P5：上游能力接入 + 模板生态
+
+**变更摘要**
+- **P4-2 定时团队巡检**：`fusion.py` 新增 `POST /api/fusion/team/schedule`（用团队+工作流创建 DeerFlow 定时任务，`assistant_id` 绑团队主代理、`prompt` 取工作流 task）、`GET /team/schedules`、`POST /team/schedules/{id}/{pause|resume|trigger}`、`DELETE /team/schedules/{id}`；对接 DeerFlow `POST /api/scheduled-tasks`（cron/interval + timezone）。前端 Studio 加"⏰ 定时巡检"面板。
+- **P4-3 Machines 定位更正**：调研确认 PenguinHarness Machines 是"把服务端装到另一台机器"的 SSH 远程部署通道（非评测计算农场），原路线图描述有误，已更正为不做代码接入。
+- **P4-1 官方 Docker 镜像**：README 部署段补充拉取官方镜像说明。
+- **P4-4 编程式子代理契约化**：进程内 API（`create_deerflow_agent` + `SubagentRuntime`）由 deer-flow 侧承载，Gateway 通过 managed-subagent API 管理（P1 已落地）。
+- **P5-1 模板版本管理**：导入同名模板版本号 +1 并归档旧版本到 `<name>.history.json`；新增 `GET /team/templates/{name}/versions`；列表/导出含版本号；修复 `.history.json` 被误列为模板的 bug。
+- **P5-2 模板来源标记**：导入请求加 `source` 字段随资产保留。
+- **单测**：新增 `test_team_templates.py`（5 项：v1 创建 / 版本递增归档 / history 不列为模板 / 内置名拒绝 / 合并读取）。
+
+**影响的文档**
+- [04-融合桥契约](04-fusion-contract.md) v1.3.0
+- [06-团队模板](06-team-templates.md) v1.3.0
+- [08-路线图](08-roadmap.md) v1.4.0
+
+**ADR**
+- [ADR-0011 定时团队巡检 与 上游能力接入边界](./ADR/ADR-0011-scheduler-and-upstream-boundary.md)
+
+---
+
 ## 2026-09-10 · v1.3.0 · 路线图 P3：团队模板资产化
 
 **变更摘要**

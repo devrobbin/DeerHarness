@@ -2,10 +2,10 @@
 
 | 项 | 值 |
 |---|---|
-| **版本** | v1.2.0 |
+| **版本** | v1.3.0 |
 | **更新时间** | 2026-09-10 |
-| **关联 ADR** | ADR-0003、ADR-0004、ADR-0008、ADR-0010 |
-| **变更摘要** | P3 落地：团队模板资产化（导出/导入 API + 合并读取） |
+| **关联 ADR** | ADR-0003、ADR-0004、ADR-0008、ADR-0010、ADR-0011 |
+| **变更摘要** | P4/P5：定时团队巡检（DeerFlow Scheduler 接入）；模板版本管理 API |
 
 ## 设计哲学
 
@@ -62,7 +62,8 @@ GET  /api/threads/{id}/state             提取 AI 回复（回退路径）
 - 团队 run：`POST /api/fusion/team/run` 启动；`GET /api/fusion/team/status/{thread_id}` 非阻塞轮询；`GET /api/fusion/team/graph/{thread_id}` FlowGraph。
 - 成员状态实时刷新（与 chat 一致的非阻塞 + 轮询）；team_runs 持久化支持重启恢复。
 - 进化产物经 `_apply_member_overrides` 合并进团队成员人设。
-- **模板资产（P3）**：`GET /api/fusion/team/templates/{name}/export` 导出 JSON 资产；`POST /api/fusion/team/templates/import` 导入自定义模板；模板读取统一走 `_get_template`（内置 + 自定义合并，自定义同名覆盖）。
+- **模板资产（P3/P5）**：`GET /api/fusion/team/templates/{name}/export` 导出 JSON 资产；`POST /api/fusion/team/templates/import` 导入自定义模板（版本号 + 历史归档）；`GET /api/fusion/team/templates/{name}/versions` 版本历史；模板读取统一走 `_get_template`（内置 + 自定义合并，自定义同名覆盖）。
+- **定时巡检（P4）**：`POST /api/fusion/team/schedule` 用团队 + 工作流创建 DeerFlow 定时任务（`assistant_id` = 团队主代理，`prompt` = 工作流 task）；`GET /team/schedules`、`POST /team/schedules/{id}/{pause|resume|trigger}`、`DELETE /team/schedules/{id}`。代理 DeerFlow `POST /api/scheduled-tasks`（需 PAT 加 `threads:write`）。
 
 ## 版本链：契约演进约束
 

@@ -1009,13 +1009,17 @@ async def _sync_orchestrator(template: str, team_members: list[dict]) -> str:
 TEMPLATE_DIR = os.path.join(os.path.dirname(__file__), "..", "config", "team_templates")
 
 _TEMPLATE_REQUIRED = {"name", "description", "soul", "workflows"}
-_TEMPLATE_FIELDS = {"name", "icon", "description", "members", "soul", "workflows"}
+_TEMPLATE_FIELDS = {"name", "icon", "description", "members", "soul", "workflows",
+                    "version", "updated_at", "source"}
 
 
 def _custom_template_names() -> list[str]:
-    """列出自定义模板文件名（不含 .json，按名排序）。"""
+    """列出自定义模板文件名（不含 .json，按名排序）。排除 *.history.json 与临时文件。"""
     os.makedirs(TEMPLATE_DIR, exist_ok=True)
-    return sorted(f[:-5] for f in os.listdir(TEMPLATE_DIR) if f.endswith(".json"))
+    return sorted(
+        f[:-5] for f in os.listdir(TEMPLATE_DIR)
+        if f.endswith(".json") and not f.endswith(".history.json")
+    )
 
 
 def _load_custom_template(name: str) -> dict | None:
@@ -1036,6 +1040,35 @@ def _load_custom_template(name: str) -> dict | None:
     if not isinstance(data.get("workflows"), list):
         return None
     return {k: data.get(k) for k in _TEMPLATE_FIELDS if k in data}
+
+
+def _template_history_path(name: str) -> str:
+    safe = re.sub(r"[^A-Za-z0-9_-]", "-", name)
+    return os.path.join(TEMPLATE_DIR, f"{safe}.history.json")
+
+
+def _read_template_history(name: str) -> list[dict]:
+    """读取模板历史版本快照（version 升序）。"""
+    path = _template_history_path(name)
+    if not os.path.isfile(path):
+        return []
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        return data if isinstance(data, list) else []
+    except (OSError, json.JSONDecodeError):
+        return []
+
+
+def _append_template_history(name: str, snapshot: dict) -> None:
+    """追加一条历史快照（原子写）。"""
+    history = _read_template_history(name)
+    history.append(snapshot)
+    path = _template_history_path(name)
+    tmp = path + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(history, f, ensure_ascii=False, indent=2)
+    os.replace(tmp, path)
 
 
 def _all_templates() -> dict[str, dict]:
@@ -1068,6 +1101,7 @@ async def fusion_team_templates():
                 "description": spec["description"],
                 "members": spec.get("members"),  # None = 全部 Agent
                 "custom": key not in TEAM_TEMPLATES,
+                "version": spec.get("version", 0),
                 "workflows": [
                     {**w, "task": evolution_store.get_effective_workflow_task(key, w["id"], w["task"])}
                     for w in spec.get("workflows", [])
@@ -1092,6 +1126,7 @@ async def fusion_team_template_export(name: str, user: User = Depends(require_de
         "members": spec.get("members"),
         "soul": spec.get("soul", ""),
         "workflows": spec.get("workflows", []),
+        "version": spec.get("version", 0),
         "exported_at": time.time(),
     }
 
@@ -1103,6 +1138,7 @@ class TemplateImportRequest(BaseModel):
     members: Optional[list[str]] = None  # None = 全部 Agent
     soul: str
     workflows: list[dict]
+    source: Optional[str] = None  # 模板来源标记（如 "community" / URL），便于共享追溯
 
 
 @router.post("/team/templates/import")
@@ -1116,6 +1152,19 @@ async def fusion_team_template_import(req: TemplateImportRequest, user: User = D
     for wf in req.workflows:
         if not isinstance(wf, dict) or not wf.get("id") or not wf.get("task"):
             raise HTTPException(status_code=400, detail="workflows 每项需含 id/label/task")
+    # 版本管理：已存在则归档旧版本，版本号 +1
+    existing = _load_custom_template(name)
+    prev_version = int((existing or {}).get("version") or 0)
+    version = prev_version + 1 if existing else 1
+    if existing:
+        _append_template_history(name, {
+            "version": prev_version,
+            "updated_at": existing.get("updated_at"),
+            "description": existing.get("description"),
+            "members": existing.get("members"),
+            "soul": existing.get("soul"),
+            "workflows": existing.get("workflows"),
+        })
     payload = {
         "name": name,
         "icon": req.icon or "🧭",
@@ -1123,6 +1172,9 @@ async def fusion_team_template_import(req: TemplateImportRequest, user: User = D
         "members": req.members,
         "soul": req.soul,
         "workflows": req.workflows,
+        "version": version,
+        "updated_at": time.time(),
+        "source": req.source,
     }
     os.makedirs(TEMPLATE_DIR, exist_ok=True)
     path = os.path.join(TEMPLATE_DIR, f"{name}.json")
@@ -1131,7 +1183,120 @@ async def fusion_team_template_import(req: TemplateImportRequest, user: User = D
     with open(tmp, "w", encoding="utf-8") as f:
         json.dump(payload, f, ensure_ascii=False, indent=2)
     os.replace(tmp, path)
-    return {"success": True, "name": name, "custom": True}
+    return {"success": True, "name": name, "custom": True, "version": version}
+
+
+@router.get("/team/templates/{name}/versions")
+async def fusion_team_template_versions(name: str, user: User = Depends(require_developer)):
+    """模板版本历史（当前版本 + 历史快照），供查看与回填。"""
+    name = valid_id(name, "name")
+    current = _load_custom_template(name)
+    if not current:
+        if name in TEAM_TEMPLATES:
+            return {"name": name, "builtin": True, "current": {"version": 0}, "history": []}
+        raise HTTPException(status_code=404, detail=f"团队模板不存在: {name}")
+    history = [
+        {"version": h.get("version"), "updated_at": h.get("updated_at"), "description": h.get("description")}
+        for h in _read_template_history(name)
+    ]
+    return {
+        "name": name,
+        "current": {
+            "version": current.get("version", 1),
+            "updated_at": current.get("updated_at"),
+            "description": current.get("description"),
+        },
+        "history": history,
+    }
+
+
+# ==================== 定时团队巡检（P4：DeerFlow Scheduler 接入） ====================
+
+
+class TeamScheduleRequest(BaseModel):
+    team_id: str
+    workflow_id: Optional[str] = None
+    prompt: Optional[str] = None  # 未提供时取工作流 task（含进化覆盖）
+    schedule_type: str = "cron"  # once / cron / interval
+    schedule_spec: dict = {}  # cron: {"cron": "0 9 * * *"}；interval: {"interval_seconds": N}
+    timezone: str = "Asia/Shanghai"
+    title: Optional[str] = None
+
+
+@router.post("/team/schedule")
+async def fusion_team_schedule(req: TeamScheduleRequest, user: User = Depends(require_developer)):
+    """把团队工作流注册为 DeerFlow 定时任务（定时巡检）。
+
+    - 先同步团队（确保主代理存在），再用团队主代理名作为 assistant_id。
+    - prompt 默认取工作流 task（已合并进化覆盖）。
+    - DeerFlow 侧 API：POST /api/scheduled-tasks（需 threads:write + runs:create）。
+    """
+    spec = _get_template(req.team_id)
+    if not spec:
+        raise HTTPException(status_code=404, detail=f"未知团队模板: {req.team_id}")
+
+    prompt = (req.prompt or "").strip()
+    workflow_label = ""
+    if not prompt:
+        if not req.workflow_id:
+            raise HTTPException(status_code=400, detail="需要 prompt 或 workflow_id")
+        wf = next((w for w in spec.get("workflows", []) if w["id"] == req.workflow_id), None)
+        if not wf:
+            raise HTTPException(status_code=404, detail=f"未知工作流: {req.workflow_id}")
+        prompt = evolution_store.get_effective_workflow_task(req.team_id, wf["id"], wf["task"])
+        workflow_label = wf.get("label", wf["id"])
+
+    # 同步团队，确保主代理（assistant_id）已注册
+    team = await _read_penguin_agent_defs()
+    allowed = spec.get("members")
+    if allowed is not None:
+        team = [m for m in team if m["agent_id"] in allowed]
+    _apply_member_overrides(team, req.team_id)
+    runner = await _sync_orchestrator(req.team_id, team)
+
+    body = {
+        "context_mode": "fresh_thread_per_run",
+        "assistant_id": runner,  # dh-orchestrator-<team>
+        "title": req.title or f"{req.team_id}·{workflow_label or '定时巡检'}",
+        "prompt": prompt,
+        "schedule_type": req.schedule_type,
+        "schedule_spec": req.schedule_spec,
+        "timezone": req.timezone,
+    }
+    data = await _proxy_df("POST", "/api/scheduled-tasks", json=body)
+    return {"success": True, "task": data, "assistant_id": runner}
+
+
+@router.get("/team/schedules")
+async def fusion_team_schedules():
+    """列出定时巡检任务（代理 DeerFlow /api/scheduled-tasks）。"""
+    data = await _proxy_df("GET", "/api/scheduled-tasks")
+    if isinstance(data, list):
+        return {"schedules": data}
+    return {"schedules": data.get("scheduled_tasks", data)}
+
+
+@router.post("/team/schedules/{task_id}/{action}")
+async def fusion_team_schedule_action(task_id: str, action: str, user: User = Depends(require_developer)):
+    """定时任务控制：pause（暂停）/ resume（恢复）/ trigger（立即触发一次）。"""
+    if action not in ("pause", "resume", "trigger"):
+        raise HTTPException(status_code=400, detail="action 必须为 pause / resume / trigger")
+    task_id = valid_id(task_id, "task_id")
+    data = await _proxy_df("POST", f"/api/scheduled-tasks/{task_id}/{action}")
+    return {"success": True, "task": data}
+
+
+@router.delete("/team/schedules/{task_id}")
+async def fusion_team_schedule_delete(task_id: str, user: User = Depends(require_admin)):
+    """删除定时巡检任务（204 无响应体，直接走客户端不解析 JSON）。"""
+    task_id = valid_id(task_id, "task_id")
+    try:
+        resp = await deerflow.request("DELETE", f"/api/scheduled-tasks/{task_id}")
+    except DeerFlowError as exc:
+        raise HTTPException(status_code=502, detail=str(exc))
+    if resp.status_code >= 400:
+        raise HTTPException(status_code=resp.status_code, detail=resp.text)
+    return {"success": True}
 
 
 def _resolve_workflow_task(template: str | None, workflow_id: str | None, task: str) -> str:

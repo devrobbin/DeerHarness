@@ -101,6 +101,7 @@ make up                # 等价于 docker compose up -d --build
 > **上游服务**（DeerFlow / PenguinHarness）通过各自的官方方式启动，见下方"真实上游联调"：
 > - DeerFlow 官方栈：`cd ../deer-flow && docker compose -f docker/docker-compose.yaml up -d`（nginx 前门 :2026）
 > - PenguinHarness 开发模式：`cd ../penguin-harness && pnpm install && pnpm dev:server`（:7368）
+> - PenguinHarness **官方 Docker 镜像**：上游由 release workflow 发布官方镜像，可直接拉取部署（免本地 pnpm 构建）；具体镜像名与 tag 见上游仓库 Release / 文档。需要多机部署时，可用上游 **Machines** 页面把 PenguinHarness 装到另一台主机（基于 `~/.ssh/config`，仅管理员）。
 
 ### 开发模式（不用 Docker）
 
@@ -182,7 +183,9 @@ curl -X POST http://localhost:2026/api/v1/auth/pats \
 # 响应 { "token": "dfp_..." } → 填入 DEERFLOW_PAT
 ```
 
-> **最小 scope**：`threads:read`（读线程/状态）+ `runs:create`（创建 run）+ `runs:read`（查 run）。仅当需要归档/删除线程时才加 `threads:write`、`threads:delete`；需取消 run 才加 `runs:cancel`。PAT 只能收窄其所有者权限，无法扩权。
+> **最小 scope**：`threads:read`（读线程/状态）+ `runs:create`（创建 run）+ `runs:read`（查 run）。
+> **定时巡检（Scheduled Tasks）需额外加 `threads:write`**（DeerFlow 创建定时任务要求 `threads:write` + `runs:create`）。
+> 仅当需要归档/删除线程时才加 `threads:delete`；需取消 run 才加 `runs:cancel`。PAT 只能收窄其所有者权限，无法扩权。
 
 ### 子代理同步（双轨）
 

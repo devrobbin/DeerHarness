@@ -24,6 +24,7 @@ interface TeamTemplate {
   members: string[] | null; // null = 全部 Agent
   workflows: Workflow[];
   custom?: boolean;
+  version?: number;
 }
 
 interface TemplateAsset {
@@ -120,6 +121,29 @@ export function TeamOrchestrator() {
       setTemplates(d.templates ?? []);
     } catch (err) {
       setAssetMsg(`导入失败：${err instanceof Error ? err.message : err}`);
+    }
+  };
+
+  // 定时巡检：DeerFlow Scheduler 接入（P4）
+  const [showSchedule, setShowSchedule] = useState(false);
+  const [scheduleCron, setScheduleCron] = useState('0 9 * * *');
+  const [scheduleTz, setScheduleTz] = useState('Asia/Shanghai');
+  const [scheduleMsg, setScheduleMsg] = useState('');
+
+  const handleSchedule = async () => {
+    if (!template) { setScheduleMsg('请先选择团队模板'); return; }
+    try {
+      const res = await apiPost<{ success: boolean; assistant_id: string }>('/api/fusion/team/schedule', {
+        team_id: template,
+        workflow_id: workflow || undefined,
+        prompt: task.trim() || undefined,
+        schedule_type: 'cron',
+        schedule_spec: { cron: scheduleCron },
+        timezone: scheduleTz,
+      });
+      setScheduleMsg(`✅ 已创建定时巡检（主代理 ${res.assistant_id}）`);
+    } catch (err) {
+      setScheduleMsg(`创建失败：${err instanceof Error ? err.message : err}`);
     }
   };
 
@@ -330,6 +354,48 @@ export function TeamOrchestrator() {
               </button>
             ))}
           </div>
+        </div>
+      )}
+
+      {/* 定时巡检：用当前团队 + 工作流创建 DeerFlow 定时任务（P4） */}
+      {activeTemplate && (
+        <div className="mb-3">
+          <button
+            onClick={() => setShowSchedule(v => !v)}
+            className="rounded border border-gray-300 px-2 py-0.5 text-xs text-gray-600 hover:bg-gray-100 dark:border-gray-600 dark:text-gray-300 dark:hover:bg-gray-700"
+          >
+            ⏰ 定时巡检（{showSchedule ? '收起' : '设置'})
+          </button>
+          {showSchedule && (
+            <div className="mt-2 space-y-1.5 rounded border border-gray-200 p-2 dark:border-gray-600">
+              <div className="flex items-center gap-1.5">
+                <span className="text-[11px] text-gray-500 dark:text-gray-400">Cron</span>
+                <input
+                  value={scheduleCron}
+                  onChange={e => setScheduleCron(e.target.value)}
+                  placeholder="0 9 * * *"
+                  className="flex-1 rounded border border-gray-300 px-1.5 py-0.5 font-mono text-xs dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100"
+                />
+                <span className="text-[11px] text-gray-500 dark:text-gray-400">时区</span>
+                <input
+                  value={scheduleTz}
+                  onChange={e => setScheduleTz(e.target.value)}
+                  className="w-28 rounded border border-gray-300 px-1.5 py-0.5 text-xs dark:border-gray-600 dark:bg-gray-700 dark:text-gray-100"
+                />
+                <button
+                  onClick={handleSchedule}
+                  className="rounded bg-purple-500 px-2 py-0.5 text-xs text-white hover:bg-purple-600"
+                >
+                  创建
+                </button>
+              </div>
+              <p className="text-[11px] text-gray-400 dark:text-gray-500">
+                绑定时使用 {activeTemplate.icon} {activeTemplate.description.split('：')[0]} 主代理
+                {workflow ? '（含所选工作流任务）' : '（未选工作流，用当前任务框内容）'}
+              </p>
+              {scheduleMsg && <p className="text-[11px] text-blue-500 dark:text-blue-300">{scheduleMsg}</p>}
+            </div>
+          )}
         </div>
       )}
 
