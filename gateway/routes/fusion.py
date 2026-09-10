@@ -1210,6 +1210,67 @@ async def fusion_team_template_versions(name: str, user: User = Depends(require_
     }
 
 
+class TemplateRollbackRequest(BaseModel):
+    version: int
+
+
+@router.post("/team/templates/{name}/rollback")
+async def fusion_team_template_rollback(
+    name: str, req: TemplateRollbackRequest, user: User = Depends(require_admin)
+):
+    """回填模板到指定历史版本：归档当前版本，把历史快照写回为新的当前版本。"""
+    name = valid_id(name, "name")
+    current = _load_custom_template(name)
+    if not current:
+        if name in TEAM_TEMPLATES:
+            raise HTTPException(status_code=400, detail="内置模板不可回填")
+        raise HTTPException(status_code=404, detail=f"团队模板不存在: {name}")
+    history = _read_template_history(name)
+    snap = next((h for h in history if int(h.get("version") or 0) == req.version), None)
+    if not snap:
+        raise HTTPException(status_code=400, detail=f"历史版本 {req.version} 不存在")
+    cur_version = int(current.get("version") or 1)
+    # 归档当前版本，再把快照写回为新版本
+    _append_template_history(name, {
+        "version": cur_version,
+        "updated_at": current.get("updated_at"),
+        "description": current.get("description"),
+        "members": current.get("members"),
+        "soul": current.get("soul"),
+        "workflows": current.get("workflows"),
+    })
+    payload = {
+        "name": name,
+        "icon": current.get("icon", "🧭"),
+        "description": snap.get("description") or current.get("description", ""),
+        "members": snap.get("members"),
+        "soul": snap.get("soul", ""),
+        "workflows": snap.get("workflows", []),
+        "version": cur_version + 1,
+        "updated_at": time.time(),
+        "source": current.get("source"),
+    }
+    path = os.path.join(TEMPLATE_DIR, f"{name}.json")
+    tmp = path + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(payload, f, ensure_ascii=False, indent=2)
+    os.replace(tmp, path)
+    return {"success": True, "name": name, "version": payload["version"], "restored_from": req.version}
+
+
+@router.get("/team/schedules/{task_id}/runs")
+async def fusion_team_schedule_runs(task_id: str, limit: int = 50, offset: int = 0):
+    """定时巡检执行历史（代理 DeerFlow /api/scheduled-tasks/{id}/runs）。"""
+    task_id = valid_id(task_id, "task_id")
+    limit = max(1, min(200, limit))
+    offset = max(0, offset)
+    data = await _proxy_df(
+        "GET", f"/api/scheduled-tasks/{task_id}/runs?limit={limit}&offset={offset}"
+    )
+    runs = data if isinstance(data, list) else data.get("runs", data)
+    return {"runs": runs}
+
+
 # ==================== 定时团队巡检（P4：DeerFlow Scheduler 接入） ====================
 
 

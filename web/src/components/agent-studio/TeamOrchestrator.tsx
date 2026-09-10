@@ -115,10 +115,8 @@ export function TeamOrchestrator() {
         soul: asset.soul,
         workflows: asset.workflows,
       });
-      setAssetMsg(`已导入模板 ${res.name}，刷新列表后可用`);
-      // 刷新模板列表
-      const d = await apiGet<{ templates: TeamTemplate[] }>('/api/fusion/team/templates');
-      setTemplates(d.templates ?? []);
+      setAssetMsg(`已导入模板 ${res.name}`);
+      await refreshTemplates();
     } catch (err) {
       setAssetMsg(`导入失败：${err instanceof Error ? err.message : err}`);
     }
@@ -144,6 +142,44 @@ export function TeamOrchestrator() {
       setScheduleMsg(`✅ 已创建定时巡检（主代理 ${res.assistant_id}）`);
     } catch (err) {
       setScheduleMsg(`创建失败：${err instanceof Error ? err.message : err}`);
+    }
+  };
+
+  // 模板版本查看 / 回填（P5）
+  const [versions, setVersions] = useState<{ version: number; updated_at?: number; description?: string }[]>([]);
+  const [showVersions, setShowVersions] = useState(false);
+  const [versionMsg, setVersionMsg] = useState('');
+
+  const refreshTemplates = async () => {
+    const d = await apiGet<{ templates: TeamTemplate[] }>('/api/fusion/team/templates');
+    setTemplates(d.templates ?? []);
+  };
+
+  const loadVersions = async () => {
+    if (!template) { setVersionMsg('请先选择团队模板'); return; }
+    try {
+      const d = await apiGet<{ current: any; history: any[] }>(
+        `/api/fusion/team/templates/${template}/versions`,
+      );
+      setVersions([d.current, ...(d.history ?? []).slice().reverse()]);
+      setShowVersions(true);
+      setVersionMsg('');
+    } catch (err) {
+      setVersionMsg(err instanceof Error ? err.message : String(err));
+    }
+  };
+
+  const rollbackVersion = async (v: number) => {
+    if (!window.confirm(`确认回填到版本 v${v}？当前内容会归档，回填后成为新版本。`)) return;
+    try {
+      const r = await apiPost<{ version: number }>(`/api/fusion/team/templates/${template}/rollback`, {
+        version: v,
+      });
+      setVersionMsg(`已回填到 v${v}（新版本 v${r.version}）`);
+      await loadVersions();
+      await refreshTemplates();
+    } catch (err) {
+      setVersionMsg(`回填失败：${err instanceof Error ? err.message : err}`);
     }
   };
 
@@ -297,11 +333,42 @@ export function TeamOrchestrator() {
           >
             📤 导出
           </button>
+          <button
+            onClick={loadVersions}
+            disabled={!template}
+            className="rounded border border-gray-300 px-1.5 py-0.5 text-[11px] text-gray-500 hover:bg-gray-100 disabled:opacity-40 dark:border-gray-600 dark:text-gray-400 dark:hover:bg-gray-700"
+          >
+            🕓 版本
+          </button>
           {assetMsg && (
             <span className="text-[11px] text-blue-500 dark:text-blue-300">{assetMsg}</span>
           )}
         </div>
       </div>
+      {showVersions && (
+        <div className="mb-3 space-y-1 rounded border border-gray-200 p-2 dark:border-gray-600">
+          <div className="flex items-center justify-between">
+            <span className="text-[11px] text-gray-500 dark:text-gray-400">版本历史（{versions.length}）</span>
+            <button onClick={() => setShowVersions(false)} className="text-[11px] text-gray-400 hover:text-gray-600">收起</button>
+          </div>
+          {versions.map((v, i) => (
+            <div key={`${v.version}-${i}`} className="flex items-center gap-2 text-[11px]">
+              <span className="font-mono text-gray-600 dark:text-gray-300">v{v.version}</span>
+              <span className="flex-1 truncate text-gray-400 dark:text-gray-500">{v.description || '-'}</span>
+              {i > 0 && (
+                <button
+                  onClick={() => rollbackVersion(v.version)}
+                  className="rounded border border-gray-300 px-1.5 py-0.5 text-gray-500 hover:bg-gray-100 dark:border-gray-600 dark:text-gray-400 dark:hover:bg-gray-700"
+                >
+                  回填
+                </button>
+              )}
+              {i === 0 && <span className="text-green-500">当前</span>}
+            </div>
+          ))}
+          {versionMsg && <p className="text-[11px] text-blue-500 dark:text-blue-300">{versionMsg}</p>}
+        </div>
+      )}
       <div className="mb-3 grid grid-cols-2 gap-1.5">
         <button
           onClick={() => handleSelectTemplate('')}

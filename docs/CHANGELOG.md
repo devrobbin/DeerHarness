@@ -7,6 +7,20 @@
 
 ---
 
+## 2026-09-10 · v1.5.0 · P5 收尾 + P6 可观测
+
+**变更摘要**
+- **P5 模板版本回填**：`fusion.py` 新增 `POST /api/fusion/team/templates/{name}/rollback` `{version}`（admin）——归档当前版本，把历史快照写回为新版本；内置模板不可回填。前端 Studio 加"🕓 版本"面板（版本列表 + 回填按钮）。
+- **P6 定时巡检执行历史**：新增 `GET /api/fusion/team/schedules/{task_id}/runs`（代理 DeerFlow `/api/scheduled-tasks/{id}/runs`，limit/offset 分页）。
+- **单测**：`test_team_templates.py` 增至 9 项（新增回填成功 / 未知版本拒绝 / 内置模板拒绝）。
+
+**影响的文档**
+- [04-融合桥契约](04-fusion-contract.md) v1.4.0
+- [06-团队模板](06-team-templates.md) v1.4.0
+- [08-路线图](08-roadmap.md) v1.5.0
+
+---
+
 ## 2026-09-10 · v1.4.0 · 路线图 P4/P5：上游能力接入 + 模板生态
 
 **变更摘要**

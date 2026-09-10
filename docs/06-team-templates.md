@@ -2,10 +2,10 @@
 
 | 项 | 值 |
 |---|---|
-| **版本** | v1.3.0 |
+| **版本** | v1.4.0 |
 | **更新时间** | 2026-09-10 |
 | **关联 ADR** | ADR-0006、ADR-0010、ADR-0011 |
-| **变更摘要** | P4/P5：模板版本管理（版本号+历史）；定时团队巡检（DeerFlow Scheduler 接入） |
+| **变更摘要** | P5 收尾：模板版本回填；P6：定时巡检执行历史 |
 
 ## 定位
 
@@ -52,6 +52,7 @@ GET  /api/fusion/team/templates                  # 列表（含 custom / version
 GET  /api/fusion/team/templates/{name}/export    # 导出资产 JSON（developer）
 POST /api/fusion/team/templates/import           # 导入自定义模板（admin）
 GET  /api/fusion/team/templates/{name}/versions  # 版本历史（developer）
+POST /api/fusion/team/templates/{name}/rollback  # 回填到历史版本（admin）
 ```
 
 - **存储**：自定义模板存 `gateway/config/team_templates/<name>.json`（原子写，可入库分享）。
@@ -64,6 +65,7 @@ GET  /api/fusion/team/templates/{name}/versions  # 版本历史（developer）
 - 二次导入同名模板 → 版本号 +1，旧版本快照归档到 `<name>.history.json`（原子写）。
 - 模板 JSON 记 `version` / `updated_at`；列表与导出均含版本号。
 - `GET /team/templates/{name}/versions` 返回当前版本 + 历史（version / updated_at / description）。
+- **回填**：`POST /team/templates/{name}/rollback` `{version}`（admin）——归档当前版本，把历史快照写回为新版本（内置模板不可回填）。
 
 ## 定时团队巡检（P4）
 
@@ -74,6 +76,7 @@ POST   /api/fusion/team/schedule                     # 创建定时巡检（deve
 GET    /api/fusion/team/schedules                    # 列表
 POST   /api/fusion/team/schedules/{id}/pause|resume|trigger   # 暂停/恢复/立即触发
 DELETE /api/fusion/team/schedules/{id}               # 删除（admin）
+GET    /api/fusion/team/schedules/{id}/runs          # 执行历史（P6）
 ```
 
 - **绑定**：`assistant_id` = 该团队主代理（`dh-orchestrator-<team>`），创建前自动同步团队确保存在。
@@ -96,7 +99,9 @@ DELETE /api/fusion/team/schedules/{id}               # 删除（admin）
 | 跨平台通用模板 | ✅ 完成 | research-ops / support-ops / dev-ops（P3） |
 | 定时团队巡检 | ✅ 完成 | DeerFlow Scheduler 接入（P4） |
 | 模板版本管理 | ✅ 完成 | 版本号 + 历史归档 + versions API（P5） |
+| 模板版本回填 | ✅ 完成 | rollback API + Studio 版本面板（P5） |
 | 模板来源标记 | ✅ 完成 | 导入 `source` 字段随资产保留（P5） |
+| 定时巡检执行历史 | ✅ 完成 | `GET /team/schedules/{id}/runs`（P6） |
 | 模板市场 / 共享仓库 | 🔜 规划 | 社区模板索引与一键导入 |
 
 ## 相关文档

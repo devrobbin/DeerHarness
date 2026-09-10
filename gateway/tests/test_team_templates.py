@@ -66,3 +66,36 @@ def test_all_templates_merges_builtin_and_custom(tmp_template_dir):
     assert "amazon-ops" in merged  # 内置
     assert "my-team" in merged     # 自定义
     assert "research-ops" in merged  # P3 通用模板
+
+
+def test_rollback_restores_history_version(tmp_template_dir):
+    import asyncio
+    asyncio.run(fusion.fusion_team_template_import(_import("my-team", "soul-v1")))
+    asyncio.run(fusion.fusion_team_template_import(_import("my-team", "soul-v2")))
+    asyncio.run(fusion.fusion_team_template_import(_import("my-team", "soul-v3")))
+    # 回填到 v1 → 新版本 v4，内容为 soul-v1
+    r = asyncio.run(
+        fusion.fusion_team_template_rollback("my-team", fusion.TemplateRollbackRequest(version=1))
+    )
+    assert r["version"] == 4 and r["restored_from"] == 1
+    assert fusion._get_template("my-team")["soul"] == "soul-v1"
+
+
+def test_rollback_unknown_version_rejected(tmp_template_dir):
+    import asyncio
+    asyncio.run(fusion.fusion_team_template_import(_import("my-team")))
+    with pytest.raises(HTTPException) as exc:
+        asyncio.run(
+            fusion.fusion_team_template_rollback("my-team", fusion.TemplateRollbackRequest(version=99))
+        )
+    assert exc.value.status_code == 400
+
+
+def test_rollback_builtin_rejected(tmp_template_dir):
+    import asyncio
+    with pytest.raises(HTTPException) as exc:
+        asyncio.run(
+            fusion.fusion_team_template_rollback("amazon-ops", fusion.TemplateRollbackRequest(version=1))
+        )
+    assert exc.value.status_code == 400
+
