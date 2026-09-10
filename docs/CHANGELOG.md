@@ -7,6 +7,20 @@
 
 ---
 
+## 2026-09-10 · v1.6.0 · P5/P6 收口：模板市场 + 执行历史 UI + Machines 状态
+
+**变更摘要**
+- **模板市场**：`GET /api/fusion/team/templates/market` 返回内置模板可导入资产目录（`installed` 标记已有副本）；Studio「🛒 市场」面板一键"导入副本"（默认 `<name>-copy`，`source` 记 `market:<原模板>`）。
+- **定时巡检执行历史 UI**：Studio 定时巡检面板加载定时任务列表（状态/标题），支持 立即跑 / 暂停 / 恢复 / 删除 / 查看执行历史（runs 列表）。
+- **Machines 状态展示**：`GET /api/dashboard/machines` 只读代理上游 `GET /api/machines`（上游不可达时降级空列表）；Monitor 健康面板加 Machines 只读区块（可安装版本 + 已安装主机）。
+- **前端**：TeamOrchestrator 引入 `apiDelete`；monitor 页加 machines 状态。
+
+**影响的文档**
+- [06-团队模板](06-team-templates.md) v1.5.0
+- [08-路线图](08-roadmap.md) v1.6.0
+
+---
+
 ## 2026-09-10 · v1.5.0 · P5 收尾 + P6 可观测
 
 **变更摘要**

@@ -1271,6 +1271,28 @@ async def fusion_team_schedule_runs(task_id: str, limit: int = 50, offset: int =
     return {"runs": runs}
 
 
+@router.get("/team/templates/market")
+async def fusion_team_template_market(user: User = Depends(require_developer)):
+    """模板市场索引：全部内置模板的可导入资产目录（一键导入为自定义副本）。
+
+    内置模板不可直接覆盖，市场提供"导入为副本"路径：用户从目录选模板 →
+    以新名称导入为自定义模板 → 可自由修改/分享。已导入（存在同名自定义）
+    的模板标记 imported。
+    """
+    items = []
+    for key, spec in TEAM_TEMPLATES.items():
+        items.append({
+            "name": key,
+            "icon": spec.get("icon", "🧭"),
+            "description": spec.get("description", ""),
+            "members": spec.get("members"),
+            "workflows": spec.get("workflows", []),
+            "soul": spec.get("soul", ""),
+            "installed": key in _custom_template_names(),
+        })
+    return {"market": items}
+
+
 # ==================== 定时团队巡检（P4：DeerFlow Scheduler 接入） ====================
 
 

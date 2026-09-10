@@ -94,3 +94,20 @@ async def health_check():
         "penguin": penguin_health,
         "deerflow": deerflow_health,
     }
+
+
+@router.get("/machines")
+async def machines_status():
+    """PenguinHarness Machines 只读状态（代理上游 GET /api/machines，仅列出不安装）。
+
+    Machines 是上游的远程部署通道（把 PenguinHarness 装到 ~/.ssh/config 中的主机）。
+    这里只读展示：本机版本、可安装版本、已安装主机列表。上游不可达时返回空列表。
+    """
+    try:
+        resp = await penguin.request("GET", "/api/machines", timeout=5)
+        if resp.status_code == 200:
+            data = resp.json()
+            return {"ok": True, "machines": data if isinstance(data, (list, dict)) else {}}
+        return {"ok": False, "status_code": resp.status_code, "machines": {}}
+    except (httpx.TimeoutException, httpx.ConnectError):
+        return {"ok": False, "reason": "penguin 不可达", "machines": {}}

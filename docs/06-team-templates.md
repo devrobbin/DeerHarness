@@ -2,10 +2,10 @@
 
 | 项 | 值 |
 |---|---|
-| **版本** | v1.4.0 |
+| **版本** | v1.5.0 |
 | **更新时间** | 2026-09-10 |
 | **关联 ADR** | ADR-0006、ADR-0010、ADR-0011 |
-| **变更摘要** | P5 收尾：模板版本回填；P6：定时巡检执行历史 |
+| **变更摘要** | P5/P6 收口：模板市场（一键导入副本）；定时巡检执行历史 UI |
 
 ## 定位
 
@@ -53,6 +53,7 @@ GET  /api/fusion/team/templates/{name}/export    # 导出资产 JSON（developer
 POST /api/fusion/team/templates/import           # 导入自定义模板（admin）
 GET  /api/fusion/team/templates/{name}/versions  # 版本历史（developer）
 POST /api/fusion/team/templates/{name}/rollback  # 回填到历史版本（admin）
+GET  /api/fusion/team/templates/market           # 模板市场索引（developer）
 ```
 
 - **存储**：自定义模板存 `gateway/config/team_templates/<name>.json`（原子写，可入库分享）。
@@ -66,6 +67,11 @@ POST /api/fusion/team/templates/{name}/rollback  # 回填到历史版本（admin
 - 模板 JSON 记 `version` / `updated_at`；列表与导出均含版本号。
 - `GET /team/templates/{name}/versions` 返回当前版本 + 历史（version / updated_at / description）。
 - **回填**：`POST /team/templates/{name}/rollback` `{version}`（admin）——归档当前版本，把历史快照写回为新版本（内置模板不可回填）。
+
+### 模板市场（P5 收口）
+
+- `GET /team/templates/market` 返回全部内置模板的可导入资产目录，`installed` 标记是否已有同名自定义副本。
+- Studio「🛒 市场」面板一键"导入副本"（默认名 `<name>-copy`，`source` 记 `market:<原模板>`）——内置模板只读不可覆盖，副本可自由修改、导出、分享。
 
 ## 定时团队巡检（P4）
 
@@ -101,8 +107,9 @@ GET    /api/fusion/team/schedules/{id}/runs          # 执行历史（P6）
 | 模板版本管理 | ✅ 完成 | 版本号 + 历史归档 + versions API（P5） |
 | 模板版本回填 | ✅ 完成 | rollback API + Studio 版本面板（P5） |
 | 模板来源标记 | ✅ 完成 | 导入 `source` 字段随资产保留（P5） |
-| 定时巡检执行历史 | ✅ 完成 | `GET /team/schedules/{id}/runs`（P6） |
-| 模板市场 / 共享仓库 | 🔜 规划 | 社区模板索引与一键导入 |
+| 定时巡检执行历史 | ✅ 完成 | `GET /team/schedules/{id}/runs` + Studio 历史 UI（P6） |
+| 模板市场 | ✅ 完成 | 市场索引 + 一键导入副本（P5 收口） |
+| Machines 状态 | ✅ 完成 | Monitor 页只读展示（`GET /api/dashboard/machines`） |
 
 ## 相关文档
 

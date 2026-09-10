@@ -76,6 +76,9 @@ export default function MonitorPage() {
   const [typeFilter, setTypeFilter] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
 
+  // Machines 只读状态（P6：上游远程部署通道）
+  const [machines, setMachines] = useState<{ ok: boolean; reason?: string; status_code?: number; machines: any } | null>(null);
+
   // 实时事件流（WS 全局频道）
   const { messages: liveEvents, connected } = useWebSocket();
   const liveTraces = useMemo(
@@ -87,6 +90,9 @@ export default function MonitorPage() {
     apiGet<{ traces: Trace[] }>('/api/traces?limit=200').then(d => setTraces(d.traces)).catch(console.error);
     apiGet<CostSummary>('/api/cost/summary').then(setCost).catch(console.error);
     apiGet<Health>('/api/dashboard/health').then(setHealth).catch(console.error);
+    apiGet<{ ok: boolean; reason?: string; status_code?: number; machines: any }>('/api/dashboard/machines')
+      .then(setMachines)
+      .catch(() => setMachines({ ok: false, reason: '加载失败', machines: {} }));
     apiGet<{ tasks: EvolveTask[] }>('/api/evolution/tasks').then(d => setEvolveTasks(d.tasks ?? [])).catch(console.error);
     apiGet<{ agents: AgentItem[] }>('/api/agents')
       .then(d => {
@@ -181,6 +187,43 @@ export default function MonitorPage() {
               })}
               {evolveTasks.length === 0 && <span className="text-gray-400">暂无</span>}
             </div>
+          </div>
+
+          {/* Machines 只读状态（PenguinHarness 远程部署通道） */}
+          <div className="mt-3 border-t border-gray-100 pt-3 dark:border-gray-700">
+            <p className="mb-1.5 text-xs text-gray-500 dark:text-gray-400">🖥️ Machines（远程部署）</p>
+            {machines ? (
+              machines.ok ? (
+                <div className="space-y-1 text-xs text-gray-600 dark:text-gray-300">
+                  {(() => {
+                    const m = machines.machines;
+                    const list: any[] = Array.isArray(m)
+                      ? m
+                      : Object.entries(m?.installs ?? {}).map(([host, v]: [string, any]) => ({ host, ...(typeof v === 'object' ? v : {}) }));
+                    const version = m?.version || m?.install_version;
+                    return (
+                      <>
+                        {version && <p className="text-gray-500 dark:text-gray-400">可安装版本：{String(version)}</p>}
+                        {list.length === 0 && <p className="text-gray-400">暂无已安装主机记录</p>}
+                        {list.map((it: any, i: number) => (
+                          <p key={it.host || it.machineId || i} className="truncate">
+                            {it.host || it.machineId || it.alias || `主机 ${i + 1}`}
+                            {it.version ? ` · ${it.version}` : ''}
+                            {it.installed_at ? ` · ${new Date(it.installed_at).toLocaleString()}` : ''}
+                          </p>
+                        ))}
+                      </>
+                    );
+                  })()}
+                </div>
+              ) : (
+                <p className="text-xs text-gray-400">
+                  上游不可达{machines.reason ? `（${machines.reason}）` : machines.status_code ? `（HTTP ${machines.status_code}）` : ''}
+                </p>
+              )
+            ) : (
+              <p className="text-xs text-gray-400">加载中…</p>
+            )}
           </div>
         </div>
 

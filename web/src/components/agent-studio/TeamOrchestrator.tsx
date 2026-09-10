@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { apiGet, apiPost } from '@/lib/api';
+import { apiGet, apiPost, apiDelete } from '@/lib/api';
 import { Markdown } from '@/components/Markdown';
 import { FlowGraph } from '@/components/agent-studio/FlowGraph';
 
@@ -145,6 +145,45 @@ export function TeamOrchestrator() {
     }
   };
 
+  // 定时任务列表 + 执行历史（P6）
+  interface ScheduleItem { id: string; title?: string; status?: string; next_run_at?: string; assistant_id?: string }
+  interface ScheduleRun { id?: string; run_id?: string; status?: string; started_at?: string; finished_at?: string }
+  const [schedules, setSchedules] = useState<ScheduleItem[]>([]);
+  const [scheduleRuns, setScheduleRuns] = useState<{ id: string; runs: ScheduleRun[] } | null>(null);
+
+  const loadSchedules = async () => {
+    try {
+      const d = await apiGet<{ schedules: ScheduleItem[] }>('/api/fusion/team/schedules');
+      setSchedules(d.schedules ?? []);
+    } catch (err) {
+      setScheduleMsg(`加载定时任务失败：${err instanceof Error ? err.message : err}`);
+    }
+  };
+
+  const scheduleAction = async (id: string, action: 'pause' | 'resume' | 'trigger' | 'delete') => {
+    if (action === 'delete' && !window.confirm('确认删除该定时巡检任务？')) return;
+    try {
+      if (action === 'delete') {
+        await apiDelete(`/api/fusion/team/schedules/${id}`);
+      } else {
+        await apiPost(`/api/fusion/team/schedules/${id}/${action}`);
+      }
+      await loadSchedules();
+    } catch (err) {
+      setScheduleMsg(`${action} 失败：${err instanceof Error ? err.message : err}`);
+    }
+  };
+
+  const loadScheduleRuns = async (id: string) => {
+    if (scheduleRuns?.id === id) { setScheduleRuns(null); return; }
+    try {
+      const d = await apiGet<{ runs: ScheduleRun[] }>(`/api/fusion/team/schedules/${id}/runs`);
+      setScheduleRuns({ id, runs: d.runs ?? [] });
+    } catch (err) {
+      setScheduleMsg(`加载执行历史失败：${err instanceof Error ? err.message : err}`);
+    }
+  };
+
   // 模板版本查看 / 回填（P5）
   const [versions, setVersions] = useState<{ version: number; updated_at?: number; description?: string }[]>([]);
   const [showVersions, setShowVersions] = useState(false);
@@ -180,6 +219,51 @@ export function TeamOrchestrator() {
       await refreshTemplates();
     } catch (err) {
       setVersionMsg(`回填失败：${err instanceof Error ? err.message : err}`);
+    }
+  };
+
+  // 模板市场（P5 余项）：内置模板一键导入为自定义副本
+  interface MarketItem {
+    name: string; icon: string; description: string;
+    members: string[] | null; soul: string;
+    workflows: { id: string; label: string; task: string }[];
+    installed: boolean;
+  }
+  const [market, setMarket] = useState<MarketItem[]>([]);
+  const [showMarket, setShowMarket] = useState(false);
+  const [marketMsg, setMarketMsg] = useState('');
+
+  const loadMarket = async () => {
+    try {
+      const d = await apiGet<{ market: MarketItem[] }>('/api/fusion/team/templates/market');
+      setMarket(d.market ?? []);
+      setShowMarket(true);
+    } catch (err) {
+      setMarketMsg(err instanceof Error ? err.message : String(err));
+    }
+  };
+
+  const installFromMarket = async (item: MarketItem) => {
+    const copyName = window.prompt(
+      `以副本名称导入「${item.name}」（仅字母/数字/下划线/连字符）：`,
+      `${item.name}-copy`,
+    );
+    if (!copyName) return;
+    try {
+      await apiPost('/api/fusion/team/templates/import', {
+        name: copyName,
+        icon: item.icon,
+        description: item.description,
+        members: item.members,
+        soul: item.soul,
+        workflows: item.workflows,
+        source: `market:${item.name}`,
+      });
+      setMarketMsg(`已导入副本 ${copyName}`);
+      await loadMarket();
+      await refreshTemplates();
+    } catch (err) {
+      setMarketMsg(`导入失败：${err instanceof Error ? err.message : err}`);
     }
   };
 
@@ -340,6 +424,12 @@ export function TeamOrchestrator() {
           >
             🕓 版本
           </button>
+          <button
+            onClick={loadMarket}
+            className="rounded border border-gray-300 px-1.5 py-0.5 text-[11px] text-gray-500 hover:bg-gray-100 dark:border-gray-600 dark:text-gray-400 dark:hover:bg-gray-700"
+          >
+            🛒 市场
+          </button>
           {assetMsg && (
             <span className="text-[11px] text-blue-500 dark:text-blue-300">{assetMsg}</span>
           )}
@@ -367,6 +457,30 @@ export function TeamOrchestrator() {
             </div>
           ))}
           {versionMsg && <p className="text-[11px] text-blue-500 dark:text-blue-300">{versionMsg}</p>}
+        </div>
+      )}
+      {showMarket && (
+        <div className="mb-3 space-y-1 rounded border border-gray-200 p-2 dark:border-gray-600">
+          <div className="flex items-center justify-between">
+            <span className="text-[11px] text-gray-500 dark:text-gray-400">模板市场（内置模板一键导入为副本）</span>
+            <button onClick={() => setShowMarket(false)} className="text-[11px] text-gray-400 hover:text-gray-600">收起</button>
+          </div>
+          {market.map(item => (
+            <div key={item.name} className="flex items-center gap-2 text-[11px]">
+              <span>{item.icon}</span>
+              <span className="flex-1 truncate text-gray-600 dark:text-gray-300" title={item.description}>
+                {item.description.split('：')[0] || item.name}
+              </span>
+              {item.installed && <span className="text-green-500">已有副本</span>}
+              <button
+                onClick={() => installFromMarket(item)}
+                className="rounded border border-gray-300 px-1.5 py-0.5 text-gray-500 hover:bg-gray-100 dark:border-gray-600 dark:text-gray-400 dark:hover:bg-gray-700"
+              >
+                导入副本
+              </button>
+            </div>
+          ))}
+          {marketMsg && <p className="text-[11px] text-blue-500 dark:text-blue-300">{marketMsg}</p>}
         </div>
       )}
       <div className="mb-3 grid grid-cols-2 gap-1.5">
@@ -461,6 +575,59 @@ export function TeamOrchestrator() {
                 {workflow ? '（含所选工作流任务）' : '（未选工作流，用当前任务框内容）'}
               </p>
               {scheduleMsg && <p className="text-[11px] text-blue-500 dark:text-blue-300">{scheduleMsg}</p>}
+
+              {/* 定时任务列表 + 执行历史（P6） */}
+              <div className="border-t border-gray-100 pt-1.5 dark:border-gray-700">
+                <div className="flex items-center justify-between">
+                  <span className="text-[11px] text-gray-500 dark:text-gray-400">
+                    已有定时任务（{schedules.length}）
+                  </span>
+                  <button
+                    onClick={loadSchedules}
+                    className="text-[11px] text-purple-500 hover:underline"
+                  >
+                    刷新
+                  </button>
+                </div>
+                {schedules.map(s => (
+                  <div key={s.id} className="mt-1 rounded bg-gray-50 p-1.5 dark:bg-gray-700/50">
+                    <div className="flex items-center gap-1.5 text-[11px]">
+                      <span className={`rounded px-1 ${
+                        s.status === 'paused'
+                          ? 'bg-yellow-100 text-yellow-600 dark:bg-yellow-900/40 dark:text-yellow-300'
+                          : 'bg-green-100 text-green-600 dark:bg-green-900/40 dark:text-green-400'
+                      }`}>{s.status || 'active'}</span>
+                      <span className="flex-1 truncate text-gray-600 dark:text-gray-300">{s.title || s.id}</span>
+                      <button onClick={() => scheduleAction(s.id, 'trigger')} className="text-purple-500 hover:underline">立即跑</button>
+                      <button
+                        onClick={() => scheduleAction(s.id, s.status === 'paused' ? 'resume' : 'pause')}
+                        className="text-purple-500 hover:underline"
+                      >
+                        {s.status === 'paused' ? '恢复' : '暂停'}
+                      </button>
+                      <button onClick={() => scheduleAction(s.id, 'delete')} className="text-red-400 hover:underline">删除</button>
+                      <button onClick={() => loadScheduleRuns(s.id)} className="text-purple-500 hover:underline">
+                        {scheduleRuns?.id === s.id ? '收起历史' : '历史'}
+                      </button>
+                    </div>
+                    {scheduleRuns?.id === s.id && (
+                      <div className="mt-1 space-y-0.5 border-t border-gray-200 pt-1 dark:border-gray-600">
+                        {scheduleRuns.runs.length === 0 && (
+                          <p className="text-[11px] text-gray-400">暂无执行记录</p>
+                        )}
+                        {scheduleRuns.runs.map((r, i) => (
+                          <p key={r.id || r.run_id || i} className="text-[11px] text-gray-500 dark:text-gray-400">
+                            #{i + 1} {r.status || 'unknown'}{r.started_at ? ` · ${new Date(r.started_at).toLocaleString()}` : ''}
+                          </p>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                ))}
+                {schedules.length === 0 && (
+                  <p className="mt-1 text-[11px] text-gray-400">点「刷新」加载定时任务列表</p>
+                )}
+              </div>
             </div>
           )}
         </div>
