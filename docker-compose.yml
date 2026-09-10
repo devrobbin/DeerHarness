@@ -22,8 +22,10 @@ services:
       - PENGUIN_USER_ID=admin
       - PENGUIN_PASSWORD=${PENGUIN_PASSWORD:?必须设置 PENGUIN_PASSWORD（禁止默认口令）}
       - DEERFLOW_API=http://host.docker.internal:2026
-      - DEERFLOW_EMAIL=${DEERFLOW_EMAIL:?必须设置 DEERFLOW_EMAIL}
-      - DEERFLOW_PASSWORD=${DEERFLOW_PASSWORD:?必须设置 DEERFLOW_PASSWORD}
+      # DeerFlow 2.X：配置 DEERFLOW_PAT 后 email/password 可省略（PAT 优先）
+      - DEERFLOW_PAT=${DEERFLOW_PAT:-}
+      - DEERFLOW_EMAIL=${DEERFLOW_EMAIL:-}
+      - DEERFLOW_PASSWORD=${DEERFLOW_PASSWORD:-}
       - ADMIN_API_KEY=${ADMIN_API_KEY:?必须设置 ADMIN_API_KEY}
       - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY:-}
       - DEERFLOW_CONFIG=/app/deer-flow-run/config.yaml

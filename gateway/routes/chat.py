@@ -212,41 +212,34 @@ async def chat(req: ChatRequest, user: User = Depends(require_developer)):
         # 1. 创建线程（幂等）
         await _proxy("POST", "/api/threads", json={"thread_id": thread_id})
 
-        # 2. 启动 run（flash 模式 + 指定模型 + 提高递归上限支持多轮工具调用）
-        run = await _proxy(
-            "POST",
-            f"/api/threads/{thread_id}/runs",
-            json={
-                "input": {"messages": [{"role": "user", "content": req.message}]},
-                "config": {"recursion_limit": 1000},
-                "context": {
-                    "model_name": DEFAULT_MODEL,
-                    "mode": "flash",
-                    "thinking_enabled": False,
-                },
+        # 2. 创建 run 并等待终态（DeerFlow 2.X：/runs/wait 优先 + 幂等键，超时安全重试）
+        body = {
+            "input": {"messages": [{"role": "user", "content": req.message}]},
+            "config": {"recursion_limit": 1000},
+            "context": {
+                "model_name": DEFAULT_MODEL,
+                "mode": "flash",
+                "thinking_enabled": False,
             },
+        }
+        result = await deerflow.run_and_wait(
+            thread_id,
+            body=body,
+            idempotency_key=f"dh-chat-{thread_id}-{uuid.uuid4().hex[:8]}",
+            poll_interval=RUN_POLL_INTERVAL,
+            poll_timeout=RUN_POLL_TIMEOUT,
         )
-        run_id = run.get("run_id")
-
-        # 3. 轮询直到终态
-        deadline = time.monotonic() + RUN_POLL_TIMEOUT
-        status = run.get("status", "pending")
-        while status in ("pending", "running", "queued"):
-            if time.monotonic() > deadline:
-                raise HTTPException(
-                    status_code=504,
-                    detail="DeerFlow 任务超时，请稍后在 DeerFlow WebUI 查看",
-                )
-            await asyncio_sleep(RUN_POLL_INTERVAL)
-            detail = await _proxy("GET", f"/api/threads/{thread_id}/runs/{run_id}")
-            status = detail.get("status", status)
+        run_id = result.get("run_id")
+        status = result.get("status", "success")
 
         if status in ("failed", "error", "cancelled"):
             # 失败不再伪装成"未返回内容"（评审 B）
             raise HTTPException(status_code=502, detail=f"DeerFlow 任务以 {status} 结束，请稍后重试")
 
-        # 4. 提取最后一条 AI 回复
-        state = await _proxy("GET", f"/api/threads/{thread_id}/state")
+        # 3. 提取最后一条 AI 回复（wait 优先返回 state；否则拉 /state）
+        state = result.get("state")
+        if not state:
+            state = await _proxy("GET", f"/api/threads/{thread_id}/state")
         reply = _extract_ai_reply(state)
         return {
             "reply": reply,
@@ -256,14 +249,10 @@ async def chat(req: ChatRequest, user: User = Depends(require_developer)):
         }
     except HTTPException:
         raise
+    except DeerFlowError as exc:
+        raise HTTPException(status_code=504, detail=str(exc))
     except Exception as exc:
         raise HTTPException(status_code=502, detail=f"DeerFlow 调用失败: {exc}")
-
-
-async def asyncio_sleep(seconds: float) -> None:
-    import asyncio
-
-    await asyncio.sleep(seconds)
 
 
 def _extract_ai_reply(state: dict) -> str:

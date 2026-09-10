@@ -4,7 +4,9 @@
 
 > 🎨 项目图标：`web/public/deerharness-logo.svg`（戴鹿角的企鹅 + Harness 轨道，融合两上游元素的原创设计，未使用任一上游图标）
 
-DeerHarness 是 **PenguinHarness**（自进化 Agent 构建工具）与 **ByteDance DeerFlow**（长链路多智能体执行框架）的融合项目，提供统一管理平台：
+> 📚 **产品设计与版本链**：完整设计文档见 [docs/](docs/README.md)（愿景 / 产品 / 架构 / 融合契约 / 进化 / 团队模板 / 安全 / 路线图 + CHANGELOG + ADR）。**DeerFlow 以 2.X 为基准。**
+
+DeerHarness 是 **PenguinHarness**（自进化 Agent 构建工具）与 **ByteDance DeerFlow 2.X**（长链路多智能体执行框架）的融合项目，提供统一管理平台：
 
 - 🐧 **PenguinHarness**：Agent 工厂 + 训练场 —— 解决"Agent 从哪里来、如何变强"
 - 🦌 **DeerFlow**：Agent 操作系统 + 工作台 —— 解决"Agent 如何协作、如何稳定干活"
@@ -23,7 +25,7 @@ DeerHarness 是 **PenguinHarness**（自进化 Agent 构建工具）与 **ByteDa
 ```
 ┌─────────────┐   ┌─────────────┐   ┌─────────────┐   ┌─────────────┐
 │  DeerFlow   │   │ PenguinHar- │   │  Gateway    │   │  WebUI      │
-│  :8001      │   │  ness :7364 │   │  :8080      │   │  :3000      │
+│  2.X :2026  │   │  ness :7368 │   │  :8080      │   │  :3002      │
 │  执行框架    │◄──┤  Agent 工厂  │   │  FastAPI    │◄──┤  Next.js    │
 │  沙箱/记忆   │   │  自进化训练   │   │  认证/RBAC  │   │  6 个页面    │
 └─────────────┘   └─────────────┘   │  WebSocket  │   └─────────────┘
@@ -33,29 +35,41 @@ DeerHarness 是 **PenguinHarness**（自进化 Agent 构建工具）与 **ByteDa
 
 - **Gateway**（FastAPI）：统一 API 网关，代理上游服务；API Key + RBAC 认证；WebSocket 实时推送；Trace 采集与成本统计存储。
 - **WebUI**（Next.js 14 + Tailwind）：Dashboard / Chat / Agent Studio / Evolution Lab / Monitor / Settings 六个页面。
-- **Fusion Bridge（真融合）**：PenguinHarness 负责 **Agent 定义**（system prompt 等），DeerFlow 提供 **执行运行时**（沙箱/记忆/子代理/搜索）。`/api/fusion/sync` 把 penguin Agent 同步为 DeerFlow Custom Agent（soul），`/api/fusion/chat` 以该身份在 DeerFlow 中运行 — Agent Studio 可一键切换运行环境。
+- **Fusion Bridge（真融合）**：PenguinHarness 负责 **Agent 定义**（system prompt 等），DeerFlow 2.X 提供 **执行运行时**（沙箱/记忆/子代理/搜索）。`/api/fusion/sync` 把 penguin Agent 同步为 DeerFlow Custom Agent（soul），`/api/fusion/chat` 以该身份在 DeerFlow 中运行 — Agent Studio 可一键切换运行环境。
 - **Docker Compose**：一键编排 DeerFlow + PenguinHarness + Gateway + Web 四服务。
 
 ## 📁 目录结构
 
 ```
 DeerHarness/
+├── docs/                       # 📚 产品设计文档体系 + 版本链（见下方文档链接）
+│   ├── README.md               # 文档门户 + 版本链总览
+│   ├── 01-vision.md ~ 08-roadmap.md  # 愿景/产品/架构/融合契约/进化/团队模板/安全/路线图
+│   ├── CHANGELOG.md            # 版本链主日志（变更强制双写）
+│   └── ADR/                    # 架构决策记录 ADR-0001 起
 ├── gateway/                    # FastAPI 网关 (:8080)
-│   ├── main.py                 # 入口 v0.7.0（7 组路由 + WebSocket）
+│   ├── main.py                 # 入口 v0.7.0（9 组路由 + WebSocket）
 │   ├── auth.py                 # API Key + RBAC (admin/developer/viewer)
+│   ├── deerflow_client.py      # DeerFlow 2.X 客户端（PAT 优先 / OAuth2 回退）
+│   ├── penguin_client.py       # PenguinHarness 客户端（session cookie）
 │   ├── ws.py                   # WebSocket 连接管理 + 实时推送
+│   ├── evolution_store.py      # 进化任务/版本/审批/配置覆盖（SQLite）
+│   ├── openapi_factory.py      # OpenAPI 工具工厂
+│   ├── observability.py        # 请求日志 + Prometheus 指标
 │   ├── Dockerfile
 │   ├── requirements.txt
-│   ├── config/                 # settings.json / users.json / traces.json
+│   ├── config/                 # settings.json / users.json / traces.json / evolution.db
 │   └── routes/
 │       ├── agents.py           # Agent 管理（代理 PenguinHarness）
-│       ├── evolution.py        # 进化任务（代理 PenguinHarness）
+│       ├── evolution.py        # 进化实验室（三层闭环 + 审批队列）
+│       ├── fusion.py           # 融合桥（同步/团队编排/评测）
+│       ├── chat.py             # Chat（DeerFlow 2.X 对话 + SSE）
 │       ├── traces.py           # Trace 数据流（采集/查询）
 │       ├── dashboard.py        # 聚合统计 + 三服务健康检查
 │       ├── cost.py             # 成本统计（按 Agent/时间聚合）
 │       ├── settings.py         # 模型/技能/MCP/渠道/安全策略
 │       └── users.py            # 用户管理
-├── web/                        # Next.js WebUI (:3000)
+├── web/                        # Next.js WebUI (:3002)
 │   ├── src/app/                # dashboard / chat / studio / evolution / monitor / settings
 │   ├── src/components/         # agent-studio / evolution-lab / settings
 │   ├── src/lib/                # api.ts / useWebSocket.ts
@@ -105,11 +119,13 @@ bash start.sh
 
 | 分组 | 端点 | 说明 |
 |---|---|---|
-| **Chat** | `POST /api/chat` | **DeerHarness WebUI → DeerFlow 真实对话**（DeepSeek V4 Flash，flash 模式） |
+| **Chat** | `POST /api/chat` | **DeerHarness WebUI → DeerFlow 2.X 真实对话**（DeepSeek V4 Flash，flash 模式） |
 | Agents | `GET/POST /api/agents` | 列出 / 创建 Agent（真实代理 penguin，跨项目展开） |
 | Agents | `DELETE /api/agents/{id}?project_id=` | 删除 Agent |
 | Evolution | `GET /api/evolution/tasks` | 跨 Agent 展开 Benchmark 清单（真实端点） |
-| Evolution | `POST /api/evolution/start` | 501：真实 penguin 仅支持 CLI 启动评测 |
+| Evolution | `POST /api/evolution/start` | **三层进化闭环**：agent / workflow / team 进化（后台逐轮 + 审批队列） |
+| Evolution | `POST /api/evolution/tasks/{id}/approve\|reject\|stop` | 审批/拒绝/停止进化任务 |
+| Fusion | `POST /api/fusion/team/run` 等 | 团队编排运行 / 状态 / FlowGraph（融合桥） |
 | Traces | `POST /api/traces` | DeerFlow 执行轨迹上报 |
 | Traces | `GET /api/traces?agent_id=` | 轨迹查询 |
 | Dashboard | `GET /api/dashboard/summary` | 聚合统计（Agent 数为真实数据） |
@@ -139,13 +155,38 @@ export PENGUIN_USER_ID=admin
 export PENGUIN_PASSWORD=<首次启动打印的密码>
 ```
 
-## 💬 DeerFlow 对话集成
+## 💬 DeerFlow 对话集成（2.X 基准）
 
-DeerHarness 的 Chat 页面（`:3000/chat`）经 Gateway 代理 DeerFlow 官方栈：
+DeerHarness 的 Chat 页面（`:3002/chat`）经 Gateway 代理 DeerFlow 官方栈：
 
-- 认证：`POST /api/v1/auth/login/local`（OAuth2 表单）→ 会话 + CSRF 双提交 cookie
-- 对话：创建线程 → `POST /threads/{id}/runs`（flash 模式）→ 轮询 → 提取 AI 回复
-- 环境变量：`DEERFLOW_API`（默认 `http://localhost:2026`）、`DEERFLOW_EMAIL`、`DEERFLOW_PASSWORD`
+- **认证（2.X 首选）**：`DEERFLOW_PAT`（Personal Access Token）→ `Authorization: Bearer`。
+- **回退**（老部署）：`DEERFLOW_EMAIL` + `DEERFLOW_PASSWORD` 走 `POST /api/v1/auth/login/local`（OAuth2 表单）→ 会话 + CSRF 双提交 cookie。
+- 对话：创建线程 → `POST /threads/{id}/runs`（flash 模式 + `Idempotency-Key`）→ `/runs/wait` 或轮询 → 提取 AI 回复。
+- 环境变量：`DEERFLOW_API`（默认 `http://localhost:2026`）、`DEERFLOW_PAT`、`DEERFLOW_EMAIL`、`DEERFLOW_PASSWORD`。
+
+### 申请 PAT（最小授权模板）
+
+用交互式登录会话创建（PAT 不能自管理 PAT，防止令牌泄露后自动造凭据）：
+
+```bash
+# 1. 在 DeerFlow WebUI 登录（交互会话）
+# 2. 创建 PAT（scopes 为最小权限子集；原始 token 仅返回一次，立即保存）
+curl -X POST http://localhost:2026/api/v1/auth/pats \
+  -H "Content-Type: application/json" \
+  -H "Cookie: <登录会话 cookie>" \
+  -d '{
+        "name": "deerharness-gateway",
+        "scopes": ["threads:read", "runs:create", "runs:read"],
+        "expires_in_days": 90
+      }'
+# 响应 { "token": "dfp_..." } → 填入 DEERFLOW_PAT
+```
+
+> **最小 scope**：`threads:read`（读线程/状态）+ `runs:create`（创建 run）+ `runs:read`（查 run）。仅当需要归档/删除线程时才加 `threads:write`、`threads:delete`；需取消 run 才加 `runs:cancel`。PAT 只能收窄其所有者权限，无法扩权。
+
+### 子代理同步（双轨）
+
+DeerFlow 2.X 提供 managed-subagent HTTP API（`GET/POST/PUT/DELETE /api/subagents`）。`/api/fusion/team/sync` 优先走 API 注册/更新成员子代理（无需改 config、无需重启）；API 不可用（老部署）时自动回退 `config.yaml` 写入 + 重启网关。
 
 > **联网搜索**：已启用 **SearXNG**（自托管聚合搜索，`:8088`，无 API key），
 > 配置了国内可用的搜索源（baidu / bing / sogou / mojeek / yandex）。

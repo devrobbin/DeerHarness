@@ -594,11 +594,14 @@ async def _read_penguin_agent_defs() -> list[dict]:
 
 
 def _write_subagents_config(team: list[dict]) -> tuple[list[str], bool]:
-    """把团队写入 deer-flow config.yaml 的 subagents.custom_agents。
+    """把团队写入 deer-flow config.yaml 的 subagents.custom_agents（回退路径）。
 
     评审 B：hash 比对（变更才写）+ 原子写（tempfile + os.replace）+ 锁；
     保留 subagents 段外的全部内容，description 转义防 YAML 注入。
     返回 (成员列表, 是否发生变更)。
+
+    DeerFlow 2.X 首选 managed-subagent HTTP API（见 sync_subagents）：
+    本函数仅作老部署/API 不可用时的回退。
     """
     global _last_config_hash
     lines = ["subagents:", "  custom_agents:"]
@@ -644,6 +647,62 @@ def _write_subagents_config(team: list[dict]) -> tuple[list[str], bool]:
                 os.replace(tmp, DEERFLOW_CONFIG)
                 _last_config_hash = new_hash
     return [m["agent_id"] for m in team], changed
+
+
+async def _sync_subagents_via_api(team: list[dict]) -> tuple[list[str], bool]:
+    """DeerFlow 2.X 优先路径：用 managed-subagent HTTP API 注册/更新子代理。
+
+    对每个成员 PUT（存在则更新）或 POST（创建）`/api/subagents`。
+    返回 (成功注册的 agent_id 列表, 是否全部走 API 成功)。
+    API 完全不可用（404/405/403）时返回 ([], False) 由调用方回退 config。
+    """
+    ok: list[str] = []
+    for member in team:
+        agent_id = re.sub(r"[^A-Za-z0-9_-]", "-", member["agent_id"])
+        prompt = member["system_prompt"] or f"你是 {member['name']}。"
+        tools = member.get("tools") or list(_DEFAULT_TOOL_WHITELIST)
+        body = {
+            "name": agent_id,
+            "display_name": member.get("name") or agent_id,
+            "description": f"同步自 PenguinHarness Agent：{member['name']}"[:200],
+            "system_prompt": prompt,
+            "tools": tools,
+            "skills": None,
+            "model": "inherit",
+            "enabled": True,
+        }
+        # 先查存在性 → PUT 更新；不存在 → POST 创建（幂等）
+        try:
+            resp = await deerflow.request("GET", f"/api/subagents/{agent_id}")
+            if resp.status_code == 200:
+                method, path, status_ok = "PUT", f"/api/subagents/{agent_id}", (200, 204)
+            elif resp.status_code == 404:
+                method, path, status_ok = "POST", "/api/subagents", (201, 200)
+            else:
+                # 列表端点都不支持 → 整体回退 config
+                return [], False
+            resp = await deerflow.request(method, path, json=body)
+            if resp.status_code not in status_ok:
+                # 单成员失败（如 name 冲突 / 校验 422）→ 回退 config 全量写
+                return [], False
+            ok.append(agent_id)
+        except DeerFlowError:
+            return [], False
+    return ok, True
+
+
+async def sync_subagents(team: list[dict]) -> tuple[list[str], str]:
+    """统一子代理同步入口（双轨）：2.X API 优先，config 写入回退。
+
+    返回 (成员列表, 使用路径)："api" / "config"。
+    """
+    api_ok, all_api = await _sync_subagents_via_api(team)
+    if all_api:
+        return api_ok, "api"
+    synced, changed = _write_subagents_config(team)
+    if changed:
+        await _restart_deerflow_gateway()
+    return synced, "config"
 
 
 async def _restart_deerflow_gateway() -> None:
@@ -722,10 +781,13 @@ async def fusion_team_sync(req: Optional[FusionTeamSyncRequest] = None, user: Us
     if req and req.template:
         _apply_member_overrides(team, req.template)
 
-    synced, changed = _write_subagents_config(team)
-    if changed:
-        await _restart_deerflow_gateway()
-    return {"success": True, "team": synced, "config": DEERFLOW_CONFIG, "restarted": changed}
+    synced, mode = await sync_subagents(team)
+    return {
+        "success": True,
+        "team": synced,
+        "mode": mode,  # "api" = DeerFlow 2.X managed-subagent API；"config" = config.yaml 回退
+        "config": DEERFLOW_CONFIG,
+    }
 
 
 def _member_desc(member: dict) -> str:
@@ -922,48 +984,62 @@ async def _fetch_case_statement(project_id: str, agent_id: str, benchmark_id: st
 
 
 def _estimate_run_cost(run_detail: dict) -> float:
-    """按 run 的真实 token 用量计价（USD）。"""
+    """按 run 的真实 token 用量计价（USD）。
+
+    DeerFlow 2.X：优先读 total_input_tokens/total_output_tokens；
+    兼容 total_tokens 汇总字段回退。token_capped 停止信号（2.X
+    subagent token_budget 硬顶触发）计入成本并显式标记，供成本护栏观测。
+    """
     inp = float(run_detail.get("total_input_tokens") or 0)
     out = float(run_detail.get("total_output_tokens") or 0)
-    return round(
-        inp / 1e6 * config.MODEL_INPUT_PRICE_PER_M + out / 1e6 * config.MODEL_OUTPUT_PRICE_PER_M,
-        6,
-    )
+    if not inp and not out:
+        total = float(run_detail.get("total_tokens") or 0)
+        inp, out = total, 0.0
+    cost = inp / 1e6 * config.MODEL_INPUT_PRICE_PER_M + out / 1e6 * config.MODEL_OUTPUT_PRICE_PER_M
+    if run_detail.get("subagent_stop_reason") == "token_capped":
+        # 子代理触发 token 硬顶：成本已发生，标记避免被误判为正常完成
+        cost = cost or 0.001
+    return round(cost, 6)
 
 
 async def _run_case(deerflow_agent: str, statement: str) -> tuple[str, str, float]:
-    """DeerFlow 以 dh-<agent> 身份执行单个评测 case，返回 (reply, status, cost)。"""
+    """DeerFlow 以 dh-<agent> 身份执行单个评测 case，返回 (reply, status, cost)。
+
+    DeerFlow 2.X：/runs/wait 优先（幂等键保证重试不重复执行），轮询回退。
+    """
     if not statement:
         return "(无题目内容)", "skipped", 0.0
     thread_id = f"dh-eval-{uuid.uuid4().hex[:12]}"
     try:
         await _proxy_df("POST", "/api/threads", json={"thread_id": thread_id})
-        run = await _proxy_df(
-            "POST",
-            f"/api/threads/{thread_id}/runs",
-            json={
-                "assistant_id": deerflow_agent,
-                "input": {"messages": [{"role": "user", "content": statement}]},
-                "config": {"recursion_limit": 1000},
-                "context": {"model_name": DEFAULT_MODEL, "mode": "flash", "thinking_enabled": False},
-            },
+        body = {
+            "assistant_id": deerflow_agent,
+            "input": {"messages": [{"role": "user", "content": statement}]},
+            "config": {"recursion_limit": 1000},
+            "context": {"model_name": DEFAULT_MODEL, "mode": "flash", "thinking_enabled": False},
+        }
+        result = await deerflow.run_and_wait(
+            thread_id,
+            body=body,
+            idempotency_key=f"dh-eval-{thread_id}",
+            poll_interval=POLL_INTERVAL,
+            poll_timeout=180.0,
         )
-        run_id = run.get("run_id")
-        deadline = time.monotonic() + 180
-        status = run.get("status", "pending")
-        detail: dict = run
-        while status in ("pending", "running", "queued"):
-            if time.monotonic() > deadline:
-                return "(评测超时)", "timeout", 0.0
-            await asyncio.sleep(POLL_INTERVAL)
-            detail = await _proxy_df("GET", f"/api/threads/{thread_id}/runs/{run_id}")
-            status = detail.get("status", status)
-        if status in ("failed", "error", "cancelled"):
+        status = result.get("status", "success")
+        if status in ("failed", "error", "cancelled", "timeout"):
             return f"(run 状态: {status})", status, 0.0
-        state = await _proxy_df("GET", f"/api/threads/{thread_id}/state")
-        return _extract_ai_reply(state), status, _estimate_run_cost(detail)
+        state = result.get("state")
+        if not state:
+            state = await _proxy_df("GET", f"/api/threads/{thread_id}/state")
+        cost = 0.0
+        detail = result.get("_detail")
+        if detail:
+            cost = _estimate_run_cost(detail)
+        return _extract_ai_reply(state), status, cost
     except HTTPException as exc:
         return f"(执行失败: {exc.detail})", "error", 0.0
+    except DeerFlowError as exc:
+        return f"(执行失败: {exc})", "error", 0.0
 
 
 async def _score_replies(results: list[dict]) -> list[dict]:

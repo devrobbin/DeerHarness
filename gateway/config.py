@@ -31,8 +31,19 @@ PENGUIN_USER_ID = _require("PENGUIN_USER_ID", default="admin", description="peng
 PENGUIN_PASSWORD = _require("PENGUIN_PASSWORD", description="penguin 管理员密码（必填，禁止默认口令）")
 
 DEERFLOW_API = _require("DEERFLOW_API", description="DeerFlow 官方栈 nginx 前门（如 http://localhost:2026）")
-DEERFLOW_EMAIL = _require("DEERFLOW_EMAIL", description="DeerFlow 管理员邮箱（必填）")
-DEERFLOW_PASSWORD = _require("DEERFLOW_PASSWORD", description="DeerFlow 管理员密码（必填，禁止默认口令）")
+# DeerFlow 2.X 认证：PAT（Personal Access Token）优先；未配置 PAT 时回退
+# email/password 表单登录（老部署兼容）。PAT 存在时凭据可省略。
+DEERFLOW_PAT = os.environ.get("DEERFLOW_PAT", "")
+DEERFLOW_EMAIL = _require(
+    "DEERFLOW_EMAIL",
+    default="" if DEERFLOW_PAT else None,
+    description="DeerFlow 管理员邮箱（未配置 DEERFLOW_PAT 时必填）",
+)
+DEERFLOW_PASSWORD = _require(
+    "DEERFLOW_PASSWORD",
+    default="" if DEERFLOW_PAT else None,
+    description="DeerFlow 管理员密码（未配置 DEERFLOW_PAT 时必填，禁止默认口令）",
+)
 
 # ---- 融合配置（宿主机部署时指向 deer-flow 配置与 compose 目录） ----
 DEERFLOW_CONFIG = os.environ.get(

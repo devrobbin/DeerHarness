@@ -26,6 +26,7 @@ from pydantic import BaseModel
 import config
 import evolution_store as store
 
+from deerflow_client import DeerFlowError
 from .fusion import (
     TEAM_TEMPLATES,
     DEFAULT_MODEL,
@@ -35,12 +36,11 @@ from .fusion import (
     _estimate_run_cost,
     _proxy_df,
     _read_penguin_agent_defs,
-    _restart_deerflow_gateway,
     _run_case,
     _score_replies,
     _sync_agent,
     _sync_orchestrator,
-    _write_subagents_config,
+    deerflow,
 )
 from .settings import _load_config as _load_settings_config
 from .traces import record_trace
@@ -128,11 +128,9 @@ async def _resolve_evolution_target(task: dict) -> tuple[str, list[dict], bool]:
     allowed = spec.get("members")
     if allowed is not None:
         team = [m for m in team if m["agent_id"] in allowed]
-    from .fusion import _apply_member_overrides
+    from .fusion import _apply_member_overrides, sync_subagents
     _apply_member_overrides(team, team_id)
-    synced, changed = _write_subagents_config(team)
-    if changed:
-        await _restart_deerflow_gateway()
+    synced, _mode = await sync_subagents(team)
     runner = await _sync_orchestrator(team_id, team)
 
     if ttype == "workflow":
@@ -148,42 +146,47 @@ async def _resolve_evolution_target(task: dict) -> tuple[str, list[dict], bool]:
 
 
 async def _run_team_case(deerflow_agent: str, statement: str) -> tuple[str, str, float]:
-    """团队模式评测：主代理 + 子代理真实执行，返回 (reply, status, cost)。"""
+    """团队模式评测：主代理 + 子代理真实执行，返回 (reply, status, cost)。
+
+    DeerFlow 2.X：/runs/wait 优先（幂等键保证重试不重复执行），轮询回退。
+    """
     if not statement:
         return "(无题目内容)", "skipped", 0.0
     thread_id = f"dh-eval-{uuid.uuid4().hex[:12]}"
     try:
         await _proxy_df("POST", "/api/threads", json={"thread_id": thread_id})
-        run = await _proxy_df(
-            "POST",
-            f"/api/threads/{thread_id}/runs",
-            json={
-                "assistant_id": deerflow_agent,
-                "input": {"messages": [{"role": "user", "content": statement}]},
-                "config": {"recursion_limit": 1000},
-                "context": {
-                    "model_name": DEFAULT_MODEL,
-                    "mode": "ultra",
-                    "subagent_enabled": True,
-                },
+        body = {
+            "assistant_id": deerflow_agent,
+            "input": {"messages": [{"role": "user", "content": statement}]},
+            "config": {"recursion_limit": 1000},
+            "context": {
+                "model_name": DEFAULT_MODEL,
+                "mode": "ultra",
+                "subagent_enabled": True,
             },
+        }
+        result = await deerflow.run_and_wait(
+            thread_id,
+            body=body,
+            idempotency_key=f"dh-evolve-{thread_id}",
+            poll_interval=POLL_INTERVAL,
+            poll_timeout=240.0,
         )
-        run_id = run.get("run_id")
-        deadline = time.monotonic() + 240
-        status = run.get("status", "pending")
-        detail: dict = run
-        while status in ("pending", "running", "queued"):
-            if time.monotonic() > deadline:
-                return "(评测超时)", "timeout", 0.0
-            await asyncio.sleep(POLL_INTERVAL)
-            detail = await _proxy_df("GET", f"/api/threads/{thread_id}/runs/{run_id}")
-            status = detail.get("status", status)
-        if status in ("failed", "error", "cancelled"):
+        status = result.get("status", "success")
+        if status in ("failed", "error", "cancelled", "timeout"):
             return f"(run 状态: {status})", status, 0.0
-        state = await _proxy_df("GET", f"/api/threads/{thread_id}/state")
-        return _extract_ai_reply(state), status, _estimate_run_cost(detail)
+        state = result.get("state")
+        if not state:
+            state = await _proxy_df("GET", f"/api/threads/{thread_id}/state")
+        cost = 0.0
+        detail = result.get("_detail")
+        if detail:
+            cost = _estimate_run_cost(detail)
+        return _extract_ai_reply(state), status, cost
     except HTTPException as exc:
         return f"(执行失败: {exc.detail})", "error", 0.0
+    except DeerFlowError as exc:
+        return f"(执行失败: {exc})", "error", 0.0
 
 
 # ==================== 改进方案 ====================
