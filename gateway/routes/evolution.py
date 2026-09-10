@@ -28,7 +28,7 @@ import evolution_store as store
 
 from deerflow_client import DeerFlowError
 from .fusion import (
-    TEAM_TEMPLATES,
+    _get_template,
     DEFAULT_MODEL,
     POLL_INTERVAL,
     _BUILTIN_BENCHMARKS,
@@ -121,7 +121,7 @@ async def _resolve_evolution_target(task: dict) -> tuple[str, list[dict], bool]:
 
     # workflow / team：同步团队 + 主代理
     team_id = task["team_id"]
-    spec = TEAM_TEMPLATES.get(team_id)
+    spec = _get_template(team_id)
     if not spec:
         raise HTTPException(status_code=404, detail=f"未知团队模板: {team_id}")
     team = await _read_penguin_agent_defs()

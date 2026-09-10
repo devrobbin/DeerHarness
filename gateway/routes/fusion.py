@@ -616,6 +616,116 @@ TEAM_TEMPLATES: dict[str, dict] = {
             },
         ],
     },
+    "research-ops": {
+        "name": "dh-orchestrator-research",
+        "icon": "🔬",
+        "description": "研究分析团队：资料调研 / 竞品分析 / 行业报告 / 结构化结论",
+        "members": [
+            "researcher",
+            "analyst",
+        ],
+        "soul": """你是研究分析团队主编，负责多源资料调研与结构化分析。
+
+工作方式：
+1. 把调研需求拆解为子任务（资料收集 / 数据整理 / 分析结论 / 报告撰写）；
+2. 通过 task 工具分派给成员，可并行；
+3. 汇总为带来源引用的分析结论，观点与事实分离。
+
+当前团队成员（按需分派）：
+{team_members}
+
+
+任务边界：若缺少真实数据，请基于公开信息给出合理假设并明确标注；务必交付可引用的结论，不要仅停留在提问。
+
+风格：风格：严谨、客观、结论先行。""",
+        "workflows": [
+            {
+                "id": "market-research",
+                "label": "市场调研",
+                "task": "开展一次目标市场调研：\n1. 市场规模与增长趋势、主要玩家与份额\n2. 目标客群画像与需求痛点\n3. 进入壁垒与机会窗口\n输出：结构化调研报告（含数据来源）。",
+            },
+            {
+                "id": "competitor-analysis",
+                "label": "竞品分析",
+                "task": "分析指定竞品：\n1. 产品/定价/渠道/内容策略拆解\n2. 优势与薄弱点、可借鉴动作\n3. 应对建议\n输出：竞品分析表 + 行动建议。",
+            },
+        ],
+    },
+    "support-ops": {
+        "name": "dh-orchestrator-support",
+        "icon": "🎧",
+        "description": "客户支持团队：工单分诊 / 客服话术 / 知识库 / 满意度复盘",
+        "members": [
+            "customer_reply",
+            "analyst",
+        ],
+        "soul": """你是客户支持主管，统筹客服工单分诊与话术质量。
+
+工作方式：
+1. 把客服需求拆解为子任务（分诊 / 话术 / 知识库检索 / 复盘）；
+2. 通过 task 工具分派给成员；
+3. 汇总为可直接使用的话术、知识条目与复盘结论。
+
+当前团队成员（按需分派）：
+{team_members}
+
+
+任务边界：若缺少真实工单数据，请基于典型场景给出合理假设并标注；务必交付可落地的回复与流程建议。
+
+风格：风格：共情、专业、解决问题导向。""",
+        "workflows": [
+            {
+                "id": "ticket-triage",
+                "label": "工单分诊",
+                "task": "对一批客服工单做分诊：\n1. 问题分类与紧急度评级（高/中/低）\n2. 对应处理路径与责任方\n3. 需升级的异常工单\n输出：分诊表（工单 / 分类 / 紧急度 / 处理建议）。",
+            },
+            {
+                "id": "reply-draft",
+                "label": "客服话术",
+                "task": "为指定客户问题拟写回复话术：\n1. 共情开场 → 解决方案 → 安抚收尾\n2. 附可替代措辞与退换货/补偿边界\n输出：可直接发送的回复 + 注意事项。",
+            },
+        ],
+    },
+    "dev-ops": {
+        "name": "dh-orchestrator-dev",
+        "icon": "💻",
+        "description": "软件开发团队：需求拆解 / 代码审查 / 缺陷分析 / 技术方案",
+        "members": [
+            "developer",
+            "reviewer",
+        ],
+        "soul": """你是软件开发主管，统筹需求拆解、代码审查与缺陷分析。
+
+工作方式：
+1. 把开发需求拆解为子任务（方案 / 实现 / 审查 / 缺陷定位）；
+2. 通过 task 工具分派给成员，可并行；
+3. 汇总为可执行的技术方案与审查结论。
+
+当前团队成员（按需分派）：
+{team_members}
+
+
+任务边界：若缺少仓库/上下文，请基于描述给出合理假设并标注；务必交付可执行的技术结论。
+
+风格：风格：务实、工程化、风险导向。""",
+        "workflows": [
+            {
+                "id": "tech-design",
+                "label": "技术方案",
+                "task": "为指定需求产出技术方案：\n1. 需求拆解与非功能性要求\n2. 架构选型与权衡（含备选）\n3. 模块划分、接口草案与风险\n输出：技术方案文档骨架。",
+            },
+            {
+                "id": "code-review",
+                "label": "代码审查",
+                "task": "审查一段代码：\n1. 正确性与边界、潜在缺陷\n2. 性能 / 安全 / 可维护性\n3. 具体修改建议（带行级理由）\n输出：审查清单（严重度 + 建议）。",
+            },
+            {
+                "id": "bug-triage",
+                "label": "缺陷分析",
+                "task": "分析一个缺陷：\n1. 复现路径与根因假设\n2. 影响面与优先级\n3. 修复方案与回归验证建议\n输出：缺陷分析报告。",
+            },
+        ],
+    },
 }
 
 
@@ -821,7 +931,7 @@ async def fusion_team_sync(req: Optional[FusionTeamSyncRequest] = None, user: Us
     """把全部（或指定）penguin Agent 注册为 DeerFlow 子代理团队并生效。"""
     team = await _read_penguin_agent_defs()
     if req and req.template:
-        spec = TEAM_TEMPLATES.get(req.template) or {}
+        spec = _get_template(req.template) or {}
         allowed = spec.get("members")
         if allowed is not None:
             team = [m for m in team if m["agent_id"] in allowed]
@@ -865,7 +975,7 @@ async def _sync_orchestrator(template: str, team_members: list[dict]) -> str:
 
     soul 动态注入真实团队成员清单（id：角色 — 职责），替代硬编码成员名。
     """
-    spec = TEAM_TEMPLATES.get(template)
+    spec = _get_template(template)
     if not spec:
         raise HTTPException(status_code=404, detail=f"未知团队模板: {template}")
     members_text = "\n".join(
@@ -894,9 +1004,62 @@ async def _sync_orchestrator(template: str, team_members: list[dict]) -> str:
     return name
 
 
+# ==================== 团队模板资产化（P3）：内置 + 自定义 JSON ====================
+
+TEMPLATE_DIR = os.path.join(os.path.dirname(__file__), "..", "config", "team_templates")
+
+_TEMPLATE_REQUIRED = {"name", "description", "soul", "workflows"}
+_TEMPLATE_FIELDS = {"name", "icon", "description", "members", "soul", "workflows"}
+
+
+def _custom_template_names() -> list[str]:
+    """列出自定义模板文件名（不含 .json，按名排序）。"""
+    os.makedirs(TEMPLATE_DIR, exist_ok=True)
+    return sorted(f[:-5] for f in os.listdir(TEMPLATE_DIR) if f.endswith(".json"))
+
+
+def _load_custom_template(name: str) -> dict | None:
+    """读取并校验自定义模板 JSON；损坏/非法返回 None。"""
+    safe = re.sub(r"[^A-Za-z0-9_-]", "-", name)
+    path = os.path.join(TEMPLATE_DIR, f"{safe}.json")
+    if not os.path.isfile(path):
+        return None
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except (OSError, json.JSONDecodeError):
+        return None
+    if not isinstance(data, dict):
+        return None
+    if not _TEMPLATE_REQUIRED.issubset(data.keys()):
+        return None
+    if not isinstance(data.get("workflows"), list):
+        return None
+    return {k: data.get(k) for k in _TEMPLATE_FIELDS if k in data}
+
+
+def _all_templates() -> dict[str, dict]:
+    """内置模板 + 自定义模板合并（自定义同名覆盖内置）。"""
+    merged = dict(TEAM_TEMPLATES)
+    for name in _custom_template_names():
+        t = _load_custom_template(name)
+        if t:
+            merged[name] = t
+    return merged
+
+
+def _get_template(name: str) -> dict | None:
+    """按名取模板：优先自定义（同名覆盖内置），回退内置。"""
+    if name in _custom_template_names():
+        t = _load_custom_template(name)
+        if t:
+            return t
+    return TEAM_TEMPLATES.get(name)
+
+
 @router.get("/team/templates")
 async def fusion_team_templates():
-    """列出可用团队模板：主代理、成员组成（None=全部）与内置工作流。"""
+    """列出可用团队模板：内置 + 自定义（自定义标记 custom:true）。"""
     return {
         "templates": [
             {
@@ -904,21 +1067,78 @@ async def fusion_team_templates():
                 "icon": spec.get("icon", "🧭"),
                 "description": spec["description"],
                 "members": spec.get("members"),  # None = 全部 Agent
+                "custom": key not in TEAM_TEMPLATES,
                 "workflows": [
                     {**w, "task": evolution_store.get_effective_workflow_task(key, w["id"], w["task"])}
                     for w in spec.get("workflows", [])
                 ],
             }
-            for key, spec in TEAM_TEMPLATES.items()
+            for key, spec in _all_templates().items()
         ]
     }
+
+
+@router.get("/team/templates/{name}/export")
+async def fusion_team_template_export(name: str, user: User = Depends(require_developer)):
+    """导出团队模板为资产 JSON（soul / members / workflows 全量，可分享再导入）。"""
+    name = valid_id(name, "name")
+    spec = _get_template(name)
+    if not spec:
+        raise HTTPException(status_code=404, detail=f"团队模板不存在: {name}")
+    return {
+        "name": name,
+        "icon": spec.get("icon", "🧭"),
+        "description": spec.get("description", ""),
+        "members": spec.get("members"),
+        "soul": spec.get("soul", ""),
+        "workflows": spec.get("workflows", []),
+        "exported_at": time.time(),
+    }
+
+
+class TemplateImportRequest(BaseModel):
+    name: str
+    icon: str = "🧭"
+    description: str = ""
+    members: Optional[list[str]] = None  # None = 全部 Agent
+    soul: str
+    workflows: list[dict]
+
+
+@router.post("/team/templates/import")
+async def fusion_team_template_import(req: TemplateImportRequest, user: User = Depends(require_admin)):
+    """导入团队模板为自定义资产（覆盖同名内置需显式 allow_override）。"""
+    name = valid_id(req.name, "name")
+    if name in TEAM_TEMPLATES:
+        raise HTTPException(status_code=409, detail=f"模板 {name} 为内置模板，请使用不同名称")
+    if not req.soul.strip():
+        raise HTTPException(status_code=400, detail="soul 不能为空")
+    for wf in req.workflows:
+        if not isinstance(wf, dict) or not wf.get("id") or not wf.get("task"):
+            raise HTTPException(status_code=400, detail="workflows 每项需含 id/label/task")
+    payload = {
+        "name": name,
+        "icon": req.icon or "🧭",
+        "description": req.description,
+        "members": req.members,
+        "soul": req.soul,
+        "workflows": req.workflows,
+    }
+    os.makedirs(TEMPLATE_DIR, exist_ok=True)
+    path = os.path.join(TEMPLATE_DIR, f"{name}.json")
+    # 原子写：临时文件 + os.replace
+    tmp = path + ".tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(payload, f, ensure_ascii=False, indent=2)
+    os.replace(tmp, path)
+    return {"success": True, "name": name, "custom": True}
 
 
 def _resolve_workflow_task(template: str | None, workflow_id: str | None, task: str) -> str:
     """工作流解析：任务为空时套用模板内置工作流的预设任务（用户可改后覆盖）。"""
     if not template or not workflow_id or task.strip():
         return task
-    spec = TEAM_TEMPLATES.get(template) or {}
+    spec = _get_template(template) or {}
     for wf in spec.get("workflows", []):
         if wf["id"] == workflow_id:
             return evolution_store.get_effective_workflow_task(template, workflow_id, wf["task"])
@@ -1208,7 +1428,7 @@ async def _prepare_team(
 
     # 模板成员限定：不同团队 = 不同班底（先按模板过滤，再按 agent_ids 收窄）
     if template:
-        spec = TEAM_TEMPLATES.get(template) or {}
+        spec = _get_template(template) or {}
         allowed = spec.get("members")
         if allowed is not None:
             team = [m for m in team if m["agent_id"] in allowed]

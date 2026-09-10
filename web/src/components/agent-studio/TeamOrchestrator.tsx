@@ -23,6 +23,16 @@ interface TeamTemplate {
   description: string;
   members: string[] | null; // null = 全部 Agent
   workflows: Workflow[];
+  custom?: boolean;
+}
+
+interface TemplateAsset {
+  name: string;
+  icon?: string;
+  description?: string;
+  members?: string[] | null;
+  soul: string;
+  workflows: { id: string; label: string; task: string }[];
 }
 
 interface TeamResult {
@@ -66,6 +76,52 @@ export function TeamOrchestrator() {
   const [error, setError] = useState('');
   const [result, setResult] = useState<TeamResult | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
+
+  // 模板资产化：导入 / 导出（P3）
+  const fileRef = useRef<HTMLInputElement>(null);
+  const [assetMsg, setAssetMsg] = useState('');
+
+  const handleExport = async () => {
+    if (!template) { setAssetMsg('请先选择一个团队模板再导出'); return; }
+    try {
+      const asset = await apiGet<TemplateAsset>(`/api/fusion/team/templates/${template}/export`);
+      const blob = new Blob([JSON.stringify(asset, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `team-template-${template}.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+      setAssetMsg(`已导出模板 ${template}`);
+    } catch (err) {
+      setAssetMsg(`导出失败：${err instanceof Error ? err.message : err}`);
+    }
+  };
+
+  const handleImportFile = async (file: File) => {
+    try {
+      const text = await file.text();
+      const asset = JSON.parse(text) as TemplateAsset;
+      if (!asset?.name || !asset?.soul || !Array.isArray(asset?.workflows)) {
+        setAssetMsg('模板格式无效：需含 name / soul / workflows');
+        return;
+      }
+      const res = await apiPost<{ success: boolean; name: string }>('/api/fusion/team/templates/import', {
+        name: asset.name,
+        icon: asset.icon || '🧭',
+        description: asset.description || '',
+        members: asset.members ?? null,
+        soul: asset.soul,
+        workflows: asset.workflows,
+      });
+      setAssetMsg(`已导入模板 ${res.name}，刷新列表后可用`);
+      // 刷新模板列表
+      const d = await apiGet<{ templates: TeamTemplate[] }>('/api/fusion/team/templates');
+      setTemplates(d.templates ?? []);
+    } catch (err) {
+      setAssetMsg(`导入失败：${err instanceof Error ? err.message : err}`);
+    }
+  };
 
   useEffect(() => {
     apiGet<{ agents: AgentItem[] }>('/api/agents')
@@ -190,7 +246,38 @@ export function TeamOrchestrator() {
       </div>
 
       {/* 团队模板：不同团队 = 不同编排人设 + 不同成员班底 */}
-      <p className="mb-1.5 text-xs font-medium text-gray-500 dark:text-gray-400">🏢 选择团队</p>
+      <div className="mb-1.5 flex items-center justify-between">
+        <p className="text-xs font-medium text-gray-500 dark:text-gray-400">🏢 选择团队</p>
+        <div className="flex items-center gap-1.5">
+          <input
+            ref={fileRef}
+            type="file"
+            accept="application/json,.json"
+            className="hidden"
+            onChange={e => {
+              const f = e.target.files?.[0];
+              if (f) handleImportFile(f);
+              e.target.value = '';
+            }}
+          />
+          <button
+            onClick={() => fileRef.current?.click()}
+            className="rounded border border-gray-300 px-1.5 py-0.5 text-[11px] text-gray-500 hover:bg-gray-100 dark:border-gray-600 dark:text-gray-400 dark:hover:bg-gray-700"
+          >
+            📥 导入模板
+          </button>
+          <button
+            onClick={handleExport}
+            disabled={!template}
+            className="rounded border border-gray-300 px-1.5 py-0.5 text-[11px] text-gray-500 hover:bg-gray-100 disabled:opacity-40 dark:border-gray-600 dark:text-gray-400 dark:hover:bg-gray-700"
+          >
+            📤 导出
+          </button>
+          {assetMsg && (
+            <span className="text-[11px] text-blue-500 dark:text-blue-300">{assetMsg}</span>
+          )}
+        </div>
+      </div>
       <div className="mb-3 grid grid-cols-2 gap-1.5">
         <button
           onClick={() => handleSelectTemplate('')}

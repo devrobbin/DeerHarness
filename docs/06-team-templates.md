@@ -2,10 +2,10 @@
 
 | 项 | 值 |
 |---|---|
-| **版本** | v1.1.0 |
+| **版本** | v1.2.0 |
 | **更新时间** | 2026-09-10 |
-| **关联 ADR** | ADR-0006 |
-| **变更摘要** | P2 落地：团队专属评测用例扩充（content-studio / crossborder-ops / ops-support 补齐），全部 5 个团队均有专属用例 |
+| **关联 ADR** | ADR-0006、ADR-0010 |
+| **变更摘要** | P3 落地：模板资产化（导入/导出 JSON）；新增 3 个非跨境通用模板（研究/客服/软件开发） |
 
 ## 定位
 
@@ -21,7 +21,9 @@ members    成员清单（penguin Agent 的 agent_id 列表；None = 全部 Agen
 workflows  预设工作流任务 [{id, label, task}]——task 即"该工作流的评测语句"
 ```
 
-## 内置模板（v1.0.0）
+## 内置模板（v1.2.0）
+
+### 跨境电商（5 个）
 
 | 模板 | icon | 成员 | 工作流 | 场景 |
 |---|---|---|---|---|
@@ -30,6 +32,30 @@ workflows  预设工作流任务 [{id, label, task}]——task 即"该工作流�
 | **tiktok-shop** | 🎵 | sourcing/content/ad/analyst | 内容周计划 / 达人合作 / GPM 复盘 | TikTok Shop 内容电商 |
 | **content-studio** | ✍️ | sourcing/content/listing | 商品页文案 / 短视频脚本 / 品牌故事 | 内容工厂 |
 | **ops-support** | 📦 | logistics/customs/tax/finance/compliance | 物流方案 / 关税合规 / 退税核算 | 履约财税 |
+
+### 通用（3 个，P3 新增）
+
+| 模板 | icon | 成员 | 工作流 | 场景 |
+|---|---|---|---|---|
+| **research-ops** | 🔬 | researcher/analyst | 市场调研 / 竞品分析 | 研究分析团队 |
+| **support-ops** | 🎧 | customer_reply/analyst | 工单分诊 / 客服话术 | 客户支持团队 |
+| **dev-ops** | 💻 | developer/reviewer | 技术方案 / 代码审查 / 缺陷分析 | 软件开发团队 |
+
+> 通用模板的成员 id 需在 penguin 侧存在同名 Agent；不存在时该成员被过滤（团队仍可用）。
+
+## 模板资产化（P3）
+
+模板可导出为 JSON 资产、导入后立即可用（内置 + 自定义合并，自定义同名覆盖内置）。
+
+```http
+GET  /api/fusion/team/templates                  # 列表（含 custom 标记）
+GET  /api/fusion/team/templates/{name}/export    # 导出资产 JSON（developer）
+POST /api/fusion/team/templates/import           # 导入自定义模板（admin）
+```
+
+- **存储**：自定义模板存 `gateway/config/team_templates/<name>.json`（原子写，可入库分享）。
+- **校验**：导入需含 `name` / `soul` / `workflows`（每项含 id/label/task）；`name` 为内置名时拒绝（409），避免覆盖内置。
+- **生效**：自定义模板与内置等价参与 team sync / run / 进化（统一走 `_get_template`）。
 
 ## 编排模型
 
@@ -42,8 +68,9 @@ workflows  预设工作流任务 [{id, label, task}]——task 即"该工作流�
 | 方向 | 状态 | 说明 |
 |---|---|---|
 | 团队级专属评测用例 | ✅ 完成 | 全部 5 团队均有专属用例（见 05-evolution「评测用例」） |
-| 模板可导入/可分享 | 🔜 规划 | 序列化为资产文件，支持导入导出 |
-| 跨平台模板 | 🔜 规划 | 非跨境通用团队（研究 / 客服 / 开发） |
+| 模板导入/导出/分享 | ✅ 完成 | JSON 资产 + 导入/导出 API + Studio UI（P3） |
+| 跨平台通用模板 | ✅ 完成 | research-ops / support-ops / dev-ops（P3） |
+| 模板市场 / 版本化 | 🔜 规划 | 模板版本管理与共享仓库 |
 
 ## 相关文档
 

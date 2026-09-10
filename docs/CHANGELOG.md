@@ -7,6 +7,23 @@
 
 ---
 
+## 2026-09-10 · v1.3.0 · 路线图 P3：团队模板资产化
+
+**变更摘要**
+- **P3-1 模板资产化**：`fusion.py` 新增自定义模板存储（`gateway/config/team_templates/<name>.json`，原子写）+ `_all_templates()`/`_get_template()` 合并读取（自定义同名覆盖内置）；新增 `GET /api/fusion/team/templates/{name}/export`（developer）与 `POST /api/fusion/team/templates/import`（admin，校验 + 内置名冲突 409）；5 处 `TEAM_TEMPLATES.get` 引用统一改为 `_get_template`（含 evolution.py）。
+- **P3-2 通用团队模板**：新增 3 个非跨境内置模板——research-ops（研究分析）、support-ops（客户支持）、dev-ops（软件开发），各含 soul + members + workflows。
+- **前端**：Studio 团队编排区加"📥 导入模板 / 📤 导出"按钮（文件选择 + 下载 JSON），列表标记 custom 模板。
+
+**影响的文档**
+- [04-融合桥契约](04-fusion-contract.md) v1.2.0
+- [06-团队模板](06-team-templates.md) v1.2.0
+- [08-路线图](08-roadmap.md) v1.3.0
+
+**ADR**
+- [ADR-0010 团队模板资产化](./ADR/ADR-0010-template-assets.md)
+
+---
+
 ## 2026-09-10 · v1.2.0 · 路线图 P2：进化能力增强
 
 **变更摘要**

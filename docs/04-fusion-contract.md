@@ -2,10 +2,10 @@
 
 | 项 | 值 |
 |---|---|
-| **版本** | v1.1.0 |
+| **版本** | v1.2.0 |
 | **更新时间** | 2026-09-10 |
-| **关联 ADR** | ADR-0003、ADR-0004、ADR-0008 |
-| **变更摘要** | P1 落地：/runs/wait 接入（wait 优先 + 轮询回退）；子代理同步双轨（managed-subagent API 优先 / config 回退）；PAT 最小 scope 模板 |
+| **关联 ADR** | ADR-0003、ADR-0004、ADR-0008、ADR-0010 |
+| **变更摘要** | P3 落地：团队模板资产化（导出/导入 API + 合并读取） |
 
 ## 设计哲学
 
@@ -62,6 +62,7 @@ GET  /api/threads/{id}/state             提取 AI 回复（回退路径）
 - 团队 run：`POST /api/fusion/team/run` 启动；`GET /api/fusion/team/status/{thread_id}` 非阻塞轮询；`GET /api/fusion/team/graph/{thread_id}` FlowGraph。
 - 成员状态实时刷新（与 chat 一致的非阻塞 + 轮询）；team_runs 持久化支持重启恢复。
 - 进化产物经 `_apply_member_overrides` 合并进团队成员人设。
+- **模板资产（P3）**：`GET /api/fusion/team/templates/{name}/export` 导出 JSON 资产；`POST /api/fusion/team/templates/import` 导入自定义模板；模板读取统一走 `_get_template`（内置 + 自定义合并，自定义同名覆盖）。
 
 ## 版本链：契约演进约束
 
