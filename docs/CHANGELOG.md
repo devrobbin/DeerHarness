@@ -7,6 +7,19 @@
 
 ---
 
+## 2026-09-11 · v1.7.2 · 评审缺口收口（G9/G10/G5 余项）
+
+**变更摘要**
+- **G9 定时巡检护栏**：创建前 `_schedule_guardrails`——全局数量上限 20；频率下限（interval ≥1h，cron 解析最小间隔 ≥1h，`*/N` 分钟步进如实计价）；`blocked_domains` 过滤 prompt（与进化同一禁入领域配置）；prompt 长度上限 8000 字符。新增 `_cron_min_interval_minutes` 粗粒度解析器。
+- **G10 模板导入供应链**：导入 soul 截断至 `_MAX_PROMPT_CHARS`（8000）+ 来源声明包装（含 source 标记），与 penguin 同步路径同等防护；模板测试断言适配包装语义。
+- **G5 余项预算覆盖**：`_under_chat_budget` 支持按轨迹前缀计量（dh-chat / dh-fusion / dh-eval / dh-team），非流式 chat、fusion chat、team run、team start 全部接入预算检查——请求级预算不再被绕过。
+- **单测**：新增 `test_guardrails.py`（12 项：cron 解析 4 / 巡检护栏 5 / 供应链 2 + 模板适配），总计 76 项。
+
+**影响的文档**
+- [07-安全与护栏](07-safety.md) v1.5.0（缺口 G1-G10 全部闭环，G4 留运维轮换动作）
+
+---
+
 ## 2026-09-11 · v1.7.1 · 评审缺口代码修复（G1-G8）
 
 **变更摘要**

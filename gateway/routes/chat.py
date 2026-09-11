@@ -41,8 +41,12 @@ class ChatRequest(BaseModel):
     thread_id: Optional[str] = None
 
 
-def _under_chat_budget() -> bool:
-    """请求级预算护栏：近 1h 内 dh-chat 轨迹累计成本 < MAX_COST_PER_REQUEST。"""
+def _under_chat_budget(agent_prefixes: tuple[str, ...] = ("dh-chat",)) -> bool:
+    """请求级预算护栏：近 1h 内指定前缀轨迹累计成本 < MAX_COST_PER_REQUEST。
+
+    评审 G5 余项：原仅覆盖流式 chat，现支持按前缀计量，供
+    非流式 chat / fusion chat / 团队 run 共用。
+    """
     if config.MAX_COST_PER_REQUEST <= 0:
         return True  # 0 = 不限
     import time as _t
@@ -55,7 +59,8 @@ def _under_chat_budget() -> bool:
     total = sum(
         float(t.get("cost") or 0)
         for t in rows
-        if str(t.get("agent_id", "")).startswith("dh-chat") and (t.get("received_at") or 0) >= cutoff
+        if str(t.get("agent_id", "")).startswith(agent_prefixes)
+        and (t.get("received_at") or 0) >= cutoff
     )
     return total < config.MAX_COST_PER_REQUEST
 

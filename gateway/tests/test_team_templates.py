@@ -31,7 +31,7 @@ def test_import_creates_v1(tmp_template_dir):
     r = asyncio.run(fusion.fusion_team_template_import(_import("my-team")))
     assert r["version"] == 1 and r["custom"] is True
     t = fusion._get_template("my-team")
-    assert t and t["soul"] == "soul-v1" and t["version"] == 1
+    assert t and "soul-v1" in t["soul"] and t["version"] == 1  # soul 含来源包装（G10）
 
 
 def test_reimport_bumps_version_and_archives(tmp_template_dir):
@@ -39,9 +39,9 @@ def test_reimport_bumps_version_and_archives(tmp_template_dir):
     asyncio.run(fusion.fusion_team_template_import(_import("my-team", "soul-v1")))
     r2 = asyncio.run(fusion.fusion_team_template_import(_import("my-team", "soul-v2")))
     assert r2["version"] == 2
-    assert fusion._get_template("my-team")["soul"] == "soul-v2"
+    assert "soul-v2" in fusion._get_template("my-team")["soul"]
     history = fusion._read_template_history("my-team")
-    assert len(history) == 1 and history[0]["version"] == 1 and history[0]["soul"] == "soul-v1"
+    assert len(history) == 1 and history[0]["version"] == 1 and "soul-v1" in history[0]["soul"]  # 归档的是包装后完整值
 
 
 def test_history_files_not_listed_as_templates(tmp_template_dir):
@@ -78,7 +78,7 @@ def test_rollback_restores_history_version(tmp_template_dir):
         fusion.fusion_team_template_rollback("my-team", fusion.TemplateRollbackRequest(version=1))
     )
     assert r["version"] == 4 and r["restored_from"] == 1
-    assert fusion._get_template("my-team")["soul"] == "soul-v1"
+    assert "soul-v1" in fusion._get_template("my-team")["soul"]
 
 
 def test_rollback_unknown_version_rejected(tmp_template_dir):
