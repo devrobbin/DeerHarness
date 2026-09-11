@@ -21,7 +21,7 @@ members    成员清单（penguin Agent 的 agent_id 列表；None = 全部 Agen
 workflows  预设工作流任务 [{id, label, task}]——task 即"该工作流的评测语句"
 ```
 
-## 内置模板（v1.2.0）
+## 内置模板
 
 ### 跨境电商（5 个）
 
@@ -41,7 +41,10 @@ workflows  预设工作流任务 [{id, label, task}]——task 即"该工作流�
 | **support-ops** | 🎧 | customer_reply/analyst | 工单分诊 / 客服话术 | 客户支持团队 |
 | **dev-ops** | 💻 | developer/reviewer | 技术方案 / 代码审查 / 缺陷分析 | 软件开发团队 |
 
-> 通用模板的成员 id 需在 penguin 侧存在同名 Agent；不存在时该成员被过滤（团队仍可用）。
+> ⚠️ **通用模板的前置条件与诚实边界（评审 P1-3/P1-4）**：
+> - 成员 id 需在 penguin 侧存在同名 Agent（researcher/analyst/customer_reply/developer/reviewer）；不存在时被过滤，**团队可能只剩主代理（"空壳团队"）**，多智能体编排退化。penguin 默认不预置这些 Agent，需自建。
+> - 3 个通用模板**当前无专属评测用例**（进化时仅通用用例覆盖，改进与场景相关性有限；专属用例待补）。
+> - 定位：验证团队模型不绑定跨境领域（引擎通用性证明 + 生态示例），不作为独立 GTM 方向（见 01-vision）。
 
 ## 模板资产化（P3/P5）
 
@@ -58,8 +61,25 @@ GET  /api/fusion/team/templates/market           # 模板市场索引（develope
 
 - **存储**：自定义模板存 `gateway/config/team_templates/<name>.json`（原子写，可入库分享）。
 - **校验**：导入需含 `name` / `soul` / `workflows`（每项含 id/label/task）；`name` 为内置名时拒绝（409），避免覆盖内置。
-- **生效**：自定义模板与内置等价参与 team sync / run / 进化（统一走 `_get_template`）。
+- **生效**：自定义模板与内置等价参与 team sync / run / 进化（统一模板解析入口）。
 - **来源标记**：导入可带 `source`（如 `community` / URL），随资产保留，便于共享追溯。
+- **⚠️ 供应链提示（评审 P1-8）**：导入的模板是**不可信输入**——soul 会原样成为主代理 system prompt（当前无长度上限与来源包装，penguin 同步路径反而有）。只导入可信来源的模板；能力增强（包装+截断）见 docs/07 已知缺口。
+
+**最小可导入示例**：
+
+```json
+{
+  "name": "my-team",
+  "icon": "🧭",
+  "description": "我的自定义团队：一句话说明",
+  "members": ["agent_id_1", "agent_id_2"],
+  "soul": "你是……主编（主代理人设）。\n\n当前团队成员（按需分派）：\n{team_members}\n\n风格：简洁、专业。",
+  "workflows": [
+    { "id": "wf1", "label": "示例工作流", "task": "具体任务描述……" }
+  ],
+  "source": "community"
+}
+```
 
 ### 版本管理（P5）
 
@@ -68,7 +88,9 @@ GET  /api/fusion/team/templates/market           # 模板市场索引（develope
 - `GET /team/templates/{name}/versions` 返回当前版本 + 历史（version / updated_at / description）。
 - **回填**：`POST /team/templates/{name}/rollback` `{version}`（admin）——归档当前版本，把历史快照写回为新版本（内置模板不可回填）。
 
-### 模板市场（P5 收口）
+### 模板库 · 一键副本（评审更名：原"模板市场"）
+
+> 当前为**内置模板目录 + 一键复制副本**，无第三方分发（共享仓库为远期方向，见 08-roadmap）。
 
 - `GET /team/templates/market` 返回全部内置模板的可导入资产目录，`installed` 标记是否已有同名自定义副本。
 - Studio「🛒 市场」面板一键"导入副本"（默认名 `<name>-copy`，`source` 记 `market:<原模板>`）——内置模板只读不可覆盖，副本可自由修改、导出、分享。
@@ -85,7 +107,8 @@ DELETE /api/fusion/team/schedules/{id}               # 删除（admin）
 GET    /api/fusion/team/schedules/{id}/runs          # 执行历史（P6）
 ```
 
-- **绑定**：`assistant_id` = 该团队主代理（`dh-orchestrator-<team>`），创建前自动同步团队确保存在。
+- **绑定**：`assistant_id` = 该团队主代理（`dh-orchestrator-<team>`），创建前自动同步主代理。**前置条件：需先执行过团队 sync（当前 schedule 仅同步主代理，不同步成员子代理——成员从未 sync 时定时任务触发无子代理可分派，评审 P2-6）。**
+- **⚠️ 安全考量**：定时任务把 prompt 持久化到 DeerFlow 由上游周期触发，**绕开网关成本护栏**且 prompt 无审查即持久化、developer 可注册高频 cron——护栏与缓解措施见 docs/07「定时巡检」。
 - **任务内容**：`prompt` 默认取工作流 task（经 `get_effective_workflow_task` 合并进化产物）。
 - **DeerFlow 侧**：代理 `POST /api/scheduled-tasks`（`schedule_type` once/cron/interval + `schedule_spec` + `timezone`）。
 - **PAT 增量授权**：定时任务需 `threads:write`（除已有 `threads:read` / `runs:create` / `runs:read`）。

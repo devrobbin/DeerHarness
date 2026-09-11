@@ -2,63 +2,107 @@
 
 | 项 | 值 |
 |---|---|
-| **版本** | v1.2.0 |
-| **更新时间** | 2026-09-10 |
-| **关联 ADR** | ADR-0004、ADR-0007 |
-| **变更摘要** | P2 落地：新增进化护栏 evolution_token_budget（DeerFlow 2.X 子代理 token 硬顶信号） |
+| **版本** | v1.3.0 |
+| **更新时间** | 2026-09-11 |
+| **关联 ADR** | ADR-0004、ADR-0007、ADR-0011、ADR-0012 |
+| **变更摘要** | 专家评审修订：权限矩阵如实重写（viewer 缺口标注）；新增「已知缺口」「信息泄露」「定时巡检」「模板供应链」节；护栏配置主场移至 05（SSOT） |
 
 ## 分层安全模型
 
 ### 1. 平台访问（DeerHarness 自身）
 
-- **API Key + RBAC**：admin / developer / viewer 三级。
-  - admin：用户管理、审批进化、融合同步（写）。
-  - developer：对话、评测、团队运行、启动进化。
-  - viewer：只读。
-- 除 `/api/health` 外全部路由挂鉴权（P0-1 修复）。
-- 管理员初始 API Key 启动播种（`bootstrap_admin`）。
+**RBAC 三级角色**（admin / developer / viewer）与守卫实现：
+
+| 角色 | 守卫 | 实际能力（以代码为准） |
+|---|---|---|
+| admin | `require_admin` | 全部：用户管理、进化审批/回滚、模板导入/回填、定时巡检删除、全部 Settings 写 |
+| developer | `require_developer`（接受 admin+developer） | 对话、评测、团队运行、启动进化、模板导出/版本查看、定时巡检创建 |
+| viewer | **⚠️ 无运行时守卫（已知缺口）** | 见下「已知缺口」 |
+
+- 除 `/api/health` 外全部路由挂登录鉴权（router 级 `get_current_user`）；`/metrics` 的鉴权状态见已知缺口。
+- 管理员初始 API Key 启动播种（`bootstrap_admin`）。**注意**：`ADMIN_API_KEY` 未配置时 dev 模式会启动成功但全部 401 且无法自助创建用户（死锁），compose 部署用 `:?` 强制可避免——dev 模式务必配置。
+- **鉴权调用约定**：所有 API 请求带 `Authorization: Bearer <ADMIN_API_KEY 或用户 API Key>`（`.env` 的 `ADMIN_API_KEY` 即首个 admin key）。
 
 ### 2. 上游凭据
 
 - **PenguinHarness**：session cookie 登录（userId/password），必填环境变量，禁止默认口令（P0-3）。
-- **DeerFlow 2.X**：**PAT（Personal Access Token）优先**——Gateway 单点持有，最小权限 scope（`threads:read` + `runs:create` + `runs:read`；需取消 run 才加 `runs:cancel`，需归档/删除线程才加 `threads:write`/`threads:delete`）；避免共享管理员账号。email/password OAuth2 仅为老部署兼容回退。
+- **DeerFlow 2.X**：**PAT（Personal Access Token）优先**——Gateway 单点持有，避免共享管理员账号。email/password OAuth2 仅为老部署兼容回退。
+- **PAT 最小 scope（SSOT 主场，其他文档引用此处）**：
+  - 基础三项：`threads:read` + `runs:create` + `runs:read`（全库无 cancel 调用，`runs:cancel` 按需追加）。
+  - **定时巡检需增量 `threads:write`**（DeerFlow 创建定时任务要求 `threads:write` + `runs:create`）。
+  - 归档/删除线程才加 `threads:delete`。PAT 只能收窄其所有者权限，无法扩权。
 - `trust_env=False` 直连，避免本机系统代理拦截回环（Windows Clash :7890 → 502）。
 
 ### 3. 成本护栏
 
-| 护栏 | 配置 | 默认 |
-|---|---|---|
-| 请求级对话预算（近 1h 累计） | `MAX_COST_PER_REQUEST` | $2.0（0=不限） |
-| 进化单任务成本上限 | `max_cost_per_evolution` | $5.0 |
-| **进化子代理 token 预算（DeerFlow 2.X）** | `evolution_token_budget` | None（不限） |
-| 真实 token 计价 | `MODEL_INPUT_PRICE_PER_M` / `MODEL_OUTPUT_PRICE_PER_M` | $0.27 / $1.10 |
-| DeerFlow 2.X token_budget 硬顶 | `subagent_stop_reason=token_capped` 信号 | 接入 |
+> 护栏配置与实现语义的 **SSOT 主场在 [05-进化引擎](05-evolution.md)**，此处仅列平台级项。
 
-### 4. 进化安全策略（Settings → Safety）
+| 护栏 | 配置 | 默认 | 覆盖范围（如实披露） |
+|---|---|---|---|
+| 请求级对话预算（近 1h 累计） | `MAX_COST_PER_REQUEST` | $2.0（0=不限） | ⚠️ **仅流式 chat**（`/api/chat/stream`）；非流式 chat、fusion/chat、团队 run 均**绕过** |
+| 进化子代理 token 预算 | `evolution_token_budget` | None | ⚠️ 本地开关（触顶即停），数值不下发 DeerFlow |
+| 真实 token 计价 | `MODEL_INPUT_PRICE_PER_M` / `MODEL_OUTPUT_PRICE_PER_M` | $0.27 / $1.10 | run 级用量统计 + 估算兜底 |
 
-| 策略 | 作用 |
-|---|---|
-| `max_evolution_rounds` | 限轮数，防无限循环 |
-| `max_cost_per_evolution` | 累计评估成本超限停止 |
-| `require_human_approval` | 进化结果人工审批门 |
-| `blocked_domains` | 过滤改进建议（禁入领域） |
+### 4. 进化安全策略
 
-**进化污染防护**：进化版输出需二次校验（验证轮复测），不因追求指标牺牲生产稳定性。
-**版本一致性**：以团队为单位联合进化，避免单子代理进化破坏协作协议。
+配置与实现语义见 [05-进化引擎「护栏」](05-evolution.md)（SSOT）。要点：`blocked_domains` 是启发式过滤（大小写敏感子串、仅生成阶段、可同义绕过）——**最终防线是人工审批门**。
 
-## 工程加固（评审落地）
+## 已知缺口（评审 ADR-0012，如实披露）
+
+> 以下是文档承诺与代码实现之间的真实缝隙。修复已列入待办，排序按风险。
+
+| # | 缺口 | 风险 | 状态 |
+|---|---|---|---|
+| G1 | **viewer 角色无只读拦截**：代码仅 admin/developer 两个守卫，viewer 实际拥有 developer 全部写权限（启动进化、删 Agent、写 Vault）——权限提升 | 单团队内部可接受；多角色对外部署**不可接受** | 🔜 修复方案：`get_current_user` 层统一 viewer+非GET→403 |
+| G2 | **`/metrics` 无鉴权**：独立挂载在 app 根，返回请求统计（路径/状态码/耗时分布） | 内网信息枚举 | 🔜 挂 admin 依赖或 scrape token |
+| G3 | **machines 端点降权**：`GET /api/dashboard/machines` 透传上游 SSH 主机清单，仅登录校验（上游定义为"仅管理员"） | 内网拓扑泄露 | 🔜 挂 admin + 字段白名单 |
+| G4 | **`import_crossborder_agents.py` 硬编码种子密码入库**（`penguin-3983`） | 已发生的凭据泄露（git 历史） | 🔜 立即：轮换 penguin 管理员密码 + 脚本改环境变量读取；重写 git 历史视部署情况评估 |
+| G5 | **成本护栏绕过路径**（见上表）：非流式/团队运行不计入请求级预算 | 成本失控 | 🔜 提升 middleware 计量 |
+| G6 | **配置回退轨限制**：PAT-only 部署探活必 503 误报（探活硬编码 email/password）；容器形态回退轨不可用（无 docker CLI + config 只读挂载） | 误导性错误 | 📄 收窄承诺：**容器部署仅支持 API 轨**；PAT-only + 回退需同时配置 email/password |
+| G7 | **团队 run 主路径未接双轨**：`_prepare_team` 仍走 config 写入 + docker restart | 容器形态团队 run 失败；重启杀 run | 🔜 接入统一入口 |
+| G8 | **`/runs/wait` 60s 超时不回退**：长任务 ReadTimeout 穿透 → 进化长评测 failed | 进化可用性 | 🔜 wait 路径独立超时或纳入回退捕获 |
+| G9 | **定时巡检护栏盲区**（见下节） | 成本/注入 | 🔜 创建时校验 |
+| G10 | **模板导入供应链**（见下节） | 提示注入 | 🔜 包装+截断 |
+
+## 信息泄露面
+
+- `/api/settings/system` 与 `/api/dashboard/health` 会返回宿主路径/内网 URL 字段——内网部署可接受，公网暴露前需收敛（/system 建议挂 admin）。
+- WS 认证支持 `Sec-WebSocket-Protocol` 头（优先）与 `?token=` 查询参数回退；**query 回退会进访问日志**，建议始终用头方式。
+- SearXNG（:8088）无鉴权——仅绑本机/内网。
+- 全栈默认无 TLS：公网部署务必置于反向代理（nginx/caddy）之后。
+
+## 定时巡检（P4 新端点的安全考量）
+
+定时任务把 prompt + cron 持久化到 DeerFlow 由**上游周期触发**，带来三个网关护栏之外的暴露：
+
+1. **成本盲区**：周期执行完全绕开 `MAX_COST_PER_REQUEST` 与 `max_cost_per_evolution`。
+2. **持久化 prompt**：prompt 写入即长期生效，无创建时审查。
+3. **频率滥用**：developer 可注册大量高频 cron。
+
+缓解（待实现）：创建时成本预估、频率/数量上限、blocked_domains 过滤。当前缓解：定时任务列表/删除可见可停（admin），创建走 developer 权限。
+
+## 模板资产供应链（P3 新端点的安全考量）
+
+- 模板导入（admin）是**提示注入信任边界**：soul 原样成为主代理 system prompt。当前无长度上限、无来源包装（对比 penguin 同步路径有 8000 字符截断 + 来源声明）。
+- 当前指引：**只导入可信来源**；共享先导出审阅再导入。
+- 待实现：导入路径复用包装+截断；导入时显式提示"不可信输入"。
+
+## 工程加固（已有实现）
 
 | 项 | 措施 |
 |---|---|
-| DNS rebinding | WebSocket 头鉴权；CORS 白名单 |
-| 配置原子写 | 临时文件 + os.replace |
-| 并发安全 | 配置写锁；任务级互斥锁；重启去重窗口 |
+| 注入消毒 | 所有拼进上游 URL 的用户参数经 `valid_id` 白名单校验 |
+| SSRF 防护 | 模型/MCP 测试 URL 经私网 IP 校验；OpenAPI fetch 同样防护 |
+| 凭据 fail-fast | 必填 env 缺失即拒启；compose `:?` 强制；运行时数据全部 gitignore（经 git 历史核查未泄漏） |
+| 配置原子写 | 临时文件 + os.replace；写锁 |
+| 并发安全 | 任务级互斥锁（单进程内有效）；重启去重窗口 |
 | 会话恢复 | 进程重启续跑 running 任务；team_runs 持久化 |
 | SQLite 版本化迁移 | user_version 顺序迁移链 |
-| 可观测性 | RequestLogMiddleware + Prometheus /metrics |
+| 凭据掩码 | bot_token 类配置只写不回显 |
+| 代理收敛 | 上游客户端 `trust_env=False`（防系统代理 SSRF 面） |
 
 ## 相关文档
 
-- 架构：[03-系统架构](03-architecture.md)
-- 进化护栏：[05-进化引擎](05-evolution.md)
-- 决策：[ADR-0007](./ADR/ADR-0007-security-model.md)
+- 架构与限制：[03-系统架构](03-architecture.md)
+- 护栏 SSOT：[05-进化引擎](05-evolution.md)
+- 决策：[ADR-0007](./ADR/ADR-0007-security-model.md)、[ADR-0012](./ADR/ADR-0012-expert-review.md)
