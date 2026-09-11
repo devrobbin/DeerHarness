@@ -7,18 +7,25 @@
 用法：
     python scripts/import_crossborder_agents.py            # 幂等（已存在跳过）
     python scripts/import_crossborder_agents.py --update   # 更新已存在的 Agent 人设
+
+凭据（全部从环境变量读取，禁止硬编码——安全评审 G4）：
+    PENGUIN_API        默认 http://localhost:7368
+    PENGUIN_USER_ID    默认 admin
+    PENGUIN_PASSWORD   必填（penguin 首次启动打印的种子密码）
+    PENGUIN_PROJECT_ID 默认 deerharness_test
 """
 
 from __future__ import annotations
 
+import os
 import sys
 
 import httpx
 
-PENGUIN_API = "http://localhost:7368"
-PENGUIN_USER_ID = "admin"
-PENGUIN_PASSWORD = "penguin-3983"
-PROJECT_ID = "deerharness_test"
+PENGUIN_API = os.environ.get("PENGUIN_API", "http://localhost:7368")
+PENGUIN_USER_ID = os.environ.get("PENGUIN_USER_ID", "admin")
+PENGUIN_PASSWORD = os.environ.get("PENGUIN_PASSWORD", "")
+PROJECT_ID = os.environ.get("PENGUIN_PROJECT_ID", "deerharness_test")
 
 # (agent_id, 角色名, 平台, 人设描述, 平台运营要点)
 AGENTS = [
@@ -111,6 +118,12 @@ def build_prompt(name: str, platform: str, persona: str, focus: list[str]) -> st
 
 def main() -> int:
     update = "--update" in sys.argv
+    if not PENGUIN_PASSWORD:
+        print(
+            "错误：缺少 PENGUIN_PASSWORD 环境变量（penguin 首次启动打印的种子密码）。\n"
+            "用法：PENGUIN_PASSWORD=penguin-xxxx python scripts/import_crossborder_agents.py"
+        )
+        return 1
     client = httpx.Client(base_url=PENGUIN_API, trust_env=False, timeout=30)
     resp = client.post("/api/auth/login", json={"userId": PENGUIN_USER_ID, "password": PENGUIN_PASSWORD})
     if resp.status_code != 200:

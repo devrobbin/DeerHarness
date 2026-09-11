@@ -902,22 +902,36 @@ async def _restart_deerflow_gateway() -> None:
 
 
 async def _wait_deerflow_ready(timeout_s: float = 60.0) -> None:
-    """轮询 deer-flow 登录直到成功，避免 restart 窗口期 502（异步版）。"""
+    """轮询 deer-flow 直到就绪，避免 restart 窗口期 502（异步版）。
+
+    探活方式按认证模式选择（评审 G6：原硬编码 email/password 登录探活，
+    PAT-only 部署下空凭据必 401 → 误报 503）：
+    - PAT 模式：带 Bearer 头 GET /api/agents 轻端点探活；
+    - OAuth2 模式：维持登录探活。
+    """
     import httpx as _httpx
 
     deadline = time.monotonic() + timeout_s
     while time.monotonic() < deadline:
         try:
-            resp = _httpx.post(
-                f"{config.DEERFLOW_API}/api/v1/auth/login/local",
-                data={
-                    "username": config.DEERFLOW_EMAIL,
-                    "password": config.DEERFLOW_PASSWORD,
-                    "remember_me": "true",
-                },
-                timeout=5.0,
-                trust_env=False,
-            )
+            if config.DEERFLOW_PAT:
+                resp = _httpx.get(
+                    f"{config.DEERFLOW_API}/api/agents",
+                    headers={"Authorization": f"Bearer {config.DEERFLOW_PAT}"},
+                    timeout=5.0,
+                    trust_env=False,
+                )
+            else:
+                resp = _httpx.post(
+                    f"{config.DEERFLOW_API}/api/v1/auth/login/local",
+                    data={
+                        "username": config.DEERFLOW_EMAIL,
+                        "password": config.DEERFLOW_PASSWORD,
+                        "remember_me": "true",
+                    },
+                    timeout=5.0,
+                    trust_env=False,
+                )
             if resp.status_code == 200:
                 return
         except Exception:
@@ -1695,10 +1709,8 @@ async def _prepare_team(
     if template:
         _apply_member_overrides(team, template)
 
-    synced, changed = _write_subagents_config(team)
-    if changed:
-        # 仅配置变化才重启（评审 B：避免每次请求杀并发 run）
-        await _restart_deerflow_gateway()
+    # 子代理同步统一入口（评审 G7：原直调 config 写入 + 重启，容器形态必失败且杀 run）
+    synced, _mode = await sync_subagents(team)
 
     # 模板主代理（可选）：soul 注入真实团队清单
     orchestrator = None

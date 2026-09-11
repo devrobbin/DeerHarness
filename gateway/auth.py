@@ -1,4 +1,4 @@
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel
 from typing import Optional
@@ -117,10 +117,20 @@ def bootstrap_admin() -> Optional[User]:
     return create_user("admin", config.ADMIN_API_KEY, role="admin")
 
 
+def _viewer_write_blocked(user: User, method: str) -> bool:
+    """viewer 只读拦截判断（安全评审 G1）：viewer + 非 GET/HEAD/OPTIONS → 拦截。"""
+    return user.role == "viewer" and method not in ("GET", "HEAD", "OPTIONS")
+
+
 async def get_current_user(
+    request: Request,
     credentials: Optional[HTTPAuthorizationCredentials] = Depends(security),
 ) -> User:
-    """从 Bearer Token 中验证用户（缺失凭证返回 401）。"""
+    """从 Bearer Token 中验证用户（缺失凭证返回 401）。
+
+    viewer 只读拦截（安全评审 G1）：viewer 角色对非 GET/HEAD 请求一律 403，
+    保证"viewer：只读"的文档承诺与实现一致。需要写权限的 viewer 应使用 developer key。
+    """
     if credentials is None:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -133,6 +143,11 @@ async def get_current_user(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="无效的 API Key",
             headers={"WWW-Authenticate": "Bearer"},
+        )
+    if _viewer_write_blocked(user, request.method):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="viewer 角色为只读权限（写操作需要 developer 及以上）",
         )
     return user
 

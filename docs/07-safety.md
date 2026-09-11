@@ -2,10 +2,10 @@
 
 | 项 | 值 |
 |---|---|
-| **版本** | v1.3.0 |
+| **版本** | v1.4.0 |
 | **更新时间** | 2026-09-11 |
 | **关联 ADR** | ADR-0004、ADR-0007、ADR-0011、ADR-0012 |
-| **变更摘要** | 专家评审修订：权限矩阵如实重写（viewer 缺口标注）；新增「已知缺口」「信息泄露」「定时巡检」「模板供应链」节；护栏配置主场移至 05（SSOT） |
+| **变更摘要** | G1-G8 代码修复落地（viewer 拦截/鉴权补齐/凭据出库/wait 超时回退/双轨接入/min 语义/探活兼容），缺口状态更新 |
 
 ## 分层安全模型
 
@@ -13,11 +13,11 @@
 
 **RBAC 三级角色**（admin / developer / viewer）与守卫实现：
 
-| 角色 | 守卫 | 实际能力（以代码为准） |
+| 角色 | 守卫 | 实际能力 |
 |---|---|---|
-| admin | `require_admin` | 全部：用户管理、进化审批/回滚、模板导入/回填、定时巡检删除、全部 Settings 写 |
+| admin | `require_admin` | 全部：用户管理、进化审批/回滚、模板导入/回填、定时巡检删除、全部 Settings 写、`/metrics` |
 | developer | `require_developer`（接受 admin+developer） | 对话、评测、团队运行、启动进化、模板导出/版本查看、定时巡检创建 |
-| viewer | **⚠️ 无运行时守卫（已知缺口）** | 见下「已知缺口」 |
+| viewer | `get_current_user` 只读拦截（**G1 已修复**） | 仅 GET/HEAD/OPTIONS；写操作一律 403 |
 
 - 除 `/api/health` 外全部路由挂登录鉴权（router 级 `get_current_user`）；`/metrics` 的鉴权状态见已知缺口。
 - 管理员初始 API Key 启动播种（`bootstrap_admin`）。**注意**：`ADMIN_API_KEY` 未配置时 dev 模式会启动成功但全部 401 且无法自助创建用户（死锁），compose 部署用 `:?` 强制可避免——dev 模式务必配置。
@@ -47,22 +47,22 @@
 
 配置与实现语义见 [05-进化引擎「护栏」](05-evolution.md)（SSOT）。要点：`blocked_domains` 是启发式过滤（大小写敏感子串、仅生成阶段、可同义绕过）——**最终防线是人工审批门**。
 
-## 已知缺口（评审 ADR-0012，如实披露）
+## 已知缺口（评审 ADR-0012，G1-G8 已修复）
 
-> 以下是文档承诺与代码实现之间的真实缝隙。修复已列入待办，排序按风险。
+> 以下是专家评审发现的文档承诺与代码实现之间的缝隙。**G1-G8 已于 2026-09-11 修复**（CHANGELOG v1.7.1），其余项状态如下：
 
 | # | 缺口 | 风险 | 状态 |
 |---|---|---|---|
-| G1 | **viewer 角色无只读拦截**：代码仅 admin/developer 两个守卫，viewer 实际拥有 developer 全部写权限（启动进化、删 Agent、写 Vault）——权限提升 | 单团队内部可接受；多角色对外部署**不可接受** | 🔜 修复方案：`get_current_user` 层统一 viewer+非GET→403 |
-| G2 | **`/metrics` 无鉴权**：独立挂载在 app 根，返回请求统计（路径/状态码/耗时分布） | 内网信息枚举 | 🔜 挂 admin 依赖或 scrape token |
-| G3 | **machines 端点降权**：`GET /api/dashboard/machines` 透传上游 SSH 主机清单，仅登录校验（上游定义为"仅管理员"） | 内网拓扑泄露 | 🔜 挂 admin + 字段白名单 |
-| G4 | **`import_crossborder_agents.py` 硬编码种子密码入库**（`penguin-3983`） | 已发生的凭据泄露（git 历史） | 🔜 立即：轮换 penguin 管理员密码 + 脚本改环境变量读取；重写 git 历史视部署情况评估 |
-| G5 | **成本护栏绕过路径**（见上表）：非流式/团队运行不计入请求级预算 | 成本失控 | 🔜 提升 middleware 计量 |
-| G6 | **配置回退轨限制**：PAT-only 部署探活必 503 误报（探活硬编码 email/password）；容器形态回退轨不可用（无 docker CLI + config 只读挂载） | 误导性错误 | 📄 收窄承诺：**容器部署仅支持 API 轨**；PAT-only + 回退需同时配置 email/password |
-| G7 | **团队 run 主路径未接双轨**：`_prepare_team` 仍走 config 写入 + docker restart | 容器形态团队 run 失败；重启杀 run | 🔜 接入统一入口 |
-| G8 | **`/runs/wait` 60s 超时不回退**：长任务 ReadTimeout 穿透 → 进化长评测 failed | 进化可用性 | 🔜 wait 路径独立超时或纳入回退捕获 |
-| G9 | **定时巡检护栏盲区**（见下节） | 成本/注入 | 🔜 创建时校验 |
-| G10 | **模板导入供应链**（见下节） | 提示注入 | 🔜 包装+截断 |
+| G1 | viewer 角色无只读拦截（权限提升） | 多角色部署不可接受 | ✅ **已修复**：`get_current_user` 层统一 viewer+非GET→403（单测覆盖） |
+| G2 | `/metrics` 无鉴权 | 内网信息枚举 | ✅ **已修复**：挂 `require_admin` |
+| G3 | machines 端点降权 | 内网拓扑泄露 | ✅ **已修复**：挂 `require_admin` |
+| G4 | `import_crossborder_agents.py` 硬编码种子密码入库 | 已发生的凭据泄露 | ✅ **代码已修复**（环境变量读取 + 缺失报错）；⚠️ **运维动作待办：轮换 penguin 管理员密码**（密码已在 git 历史） |
+| G5 | 成本护栏绕过路径（请求级预算仅流式 chat） | 成本失控 | ◐ 部分修复：`max_evolution_rounds` 改 `min()` 语义（Settings 硬上限生效）；middleware 级预算计量仍待办 |
+| G6 | 回退轨限制（PAT-only 探活 503 / 容器形态不可用） | 误导性错误 | ◐ 部分修复：探活按认证模式自适应（PAT 用 Bearer 探活）；容器形态仅支持 API 轨的收窄承诺保留（docs/04） |
+| G7 | 团队 run 主路径未接双轨 | 容器形态团队 run 失败 | ✅ **已修复**：`_prepare_team` 改调 `sync_subagents` 统一入口 |
+| G8 | `/runs/wait` 60s 超时不回退 | 进化长评测失败 | ✅ **已修复**：wait 路径独立长超时（poll_timeout+30s）+ `TimeoutException` 纳入回退捕获 |
+| G9 | 定时巡检护栏盲区（成本/频率/注入） | 成本/注入 | 🔜 待办（见 docs/06 安全考量） |
+| G10 | 模板导入供应链（soul 无截断/包装） | 提示注入 | 🔜 待办（当前指引：只导入可信来源） |
 
 ## 信息泄露面
 

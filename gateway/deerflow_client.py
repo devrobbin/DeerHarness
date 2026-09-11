@@ -143,9 +143,15 @@ class DeerFlowClient:
         """
         wait_path = f"/api/threads/{thread_id}/runs/wait"
         headers = {"Idempotency-Key": idempotency_key}
+        # wait 路径用独立长超时（评审 G8：客户端默认 60s 总超时会掐断长任务，
+        # ReadTimeout 曾直接穿透不回退 → 进化长评测系统性失败）
         try:
-            resp = await self.request("POST", wait_path, json=body, headers=headers)
-        except (DeerFlowError, httpx.ConnectError):
+            resp = await self.request(
+                "POST", wait_path, json=body, headers=headers,
+                timeout=httpx.Timeout(poll_timeout + 30.0, connect=10.0),
+            )
+        except (DeerFlowError, httpx.ConnectError, httpx.TimeoutException):
+            # wait 不可用/超时 → 回退轮询（幂等键保证 run 不重复执行）
             resp = None
         if resp is not None and resp.status_code == 200:
             data = resp.json()

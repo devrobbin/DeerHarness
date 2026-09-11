@@ -7,6 +7,24 @@
 
 ---
 
+## 2026-09-11 · v1.7.1 · 评审缺口代码修复（G1-G8）
+
+**变更摘要**
+- **G1 viewer 只读拦截**：`auth.get_current_user` 注入 Request，viewer + 非 GET/HEAD/OPTIONS → 403（新 `_viewer_write_blocked` 可测函数，4 项单测）——"viewer：只读"承诺与实现一致。
+- **G2 `/metrics` 挂鉴权**：`require_admin`（指标含路径/状态码/耗时分布等内部信息）。
+- **G3 machines 挂 admin**：`GET /api/dashboard/machines` 与上游"仅管理员"对齐（含内网 SSH 主机清单）。
+- **G4 凭据出库**：`import_crossborder_agents.py` 改环境变量读凭据（PENGUIN_PASSWORD 必填缺失报错）；⚠️ **运维待办：轮换 penguin 管理员密码**（旧密码已在 git 历史）。
+- **G5 max_rounds min 语义**：进化轮次上限 = min(请求参数, Settings 硬上限)——修复 Settings 值被请求参数短路而永不生效。
+- **G6 探活自适应**：`_wait_deerflow_ready` 按认证模式选择探活（PAT → Bearer GET /api/agents；OAuth2 → 登录探活），PAT-only 部署不再误报 503。
+- **G7 团队 run 接入双轨**：`_prepare_team` 改调 `sync_subagents` 统一入口（原直调 config 写入 + docker restart，容器形态必失败且杀并发 run）。
+- **G8 wait 超时回退**：`run_and_wait` 的 wait 路径用独立长超时（poll_timeout+30s），`TimeoutException` 纳入回退捕获——修复超 60s 长任务 ReadTimeout 穿透导致进化长评测系统性失败。
+- **单测**：新增 `test_security_fixes.py`（viewer 拦截 4 项），总计 64 项。
+
+**影响的文档**
+- [07-安全与护栏](07-safety.md) v1.4.0（缺口状态更新：G1-G8 ✅，G4 遗留运维动作，G9/G10 待办）
+
+---
+
 ## 2026-09-11 · v1.7.0 · 专家评审与文档-实现对齐
 
 **变更摘要**

@@ -7,7 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import PlainTextResponse
 
 import config
-from auth import bootstrap_admin, get_current_user
+from auth import User, bootstrap_admin, get_current_user, require_admin
 from observability import RequestLogMiddleware, metrics_text
 from routes import agents, chat, evolution, traces, dashboard, cost, settings, users, fusion
 from ws import router as ws_router
@@ -74,6 +74,10 @@ async def health():
 
 
 @app.get("/metrics", response_class=PlainTextResponse)
-async def metrics():
-    """Prometheus 文本格式指标（可观测性评审遗留）。"""
+async def metrics(user: User = Depends(require_admin)):
+    """Prometheus 文本格式指标（可观测性评审遗留）。
+
+    需 admin 鉴权（安全评审 G2）：指标含路径/状态码/耗时分布等内部信息，
+    不应无鉴权暴露。Prometheus 抓取可配置独立 admin key 或 Bearer 头。
+    """
     return metrics_text()

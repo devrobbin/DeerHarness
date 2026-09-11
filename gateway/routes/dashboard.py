@@ -4,11 +4,12 @@
 DeerFlow（执行框架）、网关本地 SQLite trace store。
 """
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 import httpx
 
 import config
 import trace_store
+from auth import require_admin
 from penguin_client import PenguinClient
 
 from .agents import _all_agents
@@ -97,10 +98,11 @@ async def health_check():
 
 
 @router.get("/machines")
-async def machines_status():
+async def machines_status(user=Depends(require_admin)):
     """PenguinHarness Machines 只读状态（代理上游 GET /api/machines，仅列出不安装）。
 
-    Machines 是上游的远程部署通道（把 PenguinHarness 装到 ~/.ssh/config 中的主机）。
+    需 admin（安全评审 G3）：上游该能力即"仅管理员"，响应含内网 SSH 主机清单，
+    不能降权给普通登录用户。
     这里只读展示：本机版本、可安装版本、已安装主机列表。上游不可达时返回空列表。
     """
     try:

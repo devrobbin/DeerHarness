@@ -342,7 +342,9 @@ async def _advance_inner(task_id: str) -> None:
     if not task or task["status"] != "running":
         return
     safety = _load_settings_config().get("safety") or {}
-    max_rounds = task["max_rounds"] or int(safety.get("max_evolution_rounds", 10))
+    # 轮次上限取 min（评审 G5：原 `task or settings` 导致 Settings 值永不生效——
+    # 请求参数永非零即短路。现语义：请求参数为意愿值，Settings 为硬上限）
+    max_rounds = min(int(task["max_rounds"] or 10), int(safety.get("max_evolution_rounds", 10)))
     max_cost = float(safety.get("max_cost_per_evolution", 5.0))
     require_approval = bool(safety.get("require_human_approval", True))
     blocked = safety.get("blocked_domains", []) or []
