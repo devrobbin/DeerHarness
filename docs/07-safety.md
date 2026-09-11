@@ -56,7 +56,7 @@
 | G1 | viewer 角色无只读拦截（权限提升） | 多角色部署不可接受 | ✅ **已修复**：`get_current_user` 层统一 viewer+非GET→403（单测覆盖） |
 | G2 | `/metrics` 无鉴权 | 内网信息枚举 | ✅ **已修复**：挂 `require_admin` |
 | G3 | machines 端点降权 | 内网拓扑泄露 | ✅ **已修复**：挂 `require_admin` |
-| G4 | `import_crossborder_agents.py` 硬编码种子密码入库 | 已发生的凭据泄露 | ✅ **代码已修复**（环境变量读取 + 缺失报错）；⚠️ **运维动作待办：轮换 penguin 管理员密码**（密码已在 git 历史） |
+| G4 | `import_crossborder_agents.py` 硬编码种子密码入库 | 已发生的凭据泄露 | ✅ **已完全闭环（2026-09-11）**：脚本改环境变量读取；penguin 管理员密码已轮换（scrypt 哈希直更 web.db + 吊销全部 141 个历史会话 + `.env` 同步更新，三项验证通过）。泄露的旧密码 `penguin-3983` 已失效。注意：仓库若将来公开，仍建议评估重写 git 历史（`git filter-repo`） |
 | G5 | 成本护栏绕过路径（请求级预算仅流式 chat） | 成本失控 | ✅ **已修复**：预算计量扩展到非流式 chat / fusion chat / 团队 run / start（按轨迹前缀 dh-chat/dh-fusion/dh-eval/dh-team 计量）；`max_rounds` 改 `min()` 语义 |
 | G6 | 回退轨限制（PAT-only 探活 503 / 容器形态不可用） | 误导性错误 | ✅ **已修复探活**（PAT 模式 Bearer 探活）；容器形态仅支持 API 轨的收窄承诺保留（docs/04） |
 | G7 | 团队 run 主路径未接双轨 | 容器形态团队 run 失败 | ✅ **已修复**：`_prepare_team` 改调 `sync_subagents` 统一入口 |
