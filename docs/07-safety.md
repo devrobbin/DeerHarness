@@ -2,10 +2,10 @@
 
 | 项 | 值 |
 |---|---|
-| **版本** | v1.5.0 |
+| **版本** | v1.5.1 |
 | **更新时间** | 2026-09-11 |
 | **关联 ADR** | ADR-0004、ADR-0007、ADR-0011、ADR-0012 |
-| **变更摘要** | G1-G8 修复落地；G9/G10/G5 余项修复（巡检护栏/模板供应链/预算覆盖）；缺口全部闭环（G4 留运维轮换动作） |
+| **变更摘要** | 新增「上游凭据轮换」运维指引（官方命令 + 旧版直改 web.db 两条路径）；G4 完全闭环 |
 
 ## 分层安全模型
 
@@ -86,6 +86,29 @@
 - 模板导入（admin）是**提示注入信任边界**：soul 原样成为主代理 system prompt。当前无长度上限、无来源包装（对比 penguin 同步路径有 8000 字符截断 + 来源声明）。
 - 当前指引：**只导入可信来源**；共享先导出审阅再导入。
 - 待实现：导入路径复用包装+截断；导入时显式提示"不可信输入"。
+
+## 上游凭据轮换（PenguinHarness 管理员密码）
+
+> 当 penguin 凭据疑似泄露、或凭据曾入库需要作废时，按本节执行。penguin 密码字段存 **scrypt 慢哈希**（格式 `scrypt$16384$8$1$<salt b64>$<hash b64>`），**不能直接 UPDATE 明文**。
+
+### 优先路径：上游官方命令（penguin ≥0.2.6）
+
+```bash
+# 1. 停掉 penguin 服务（web.db 单写者，服务器运行中会拒绝）
+# 2. 离线重置（回到未认领状态 + 吊销全部会话）
+penguin server reset-admin-password
+# 3. 重启服务 → 启动时打印首次登录链接 → 设置新密码 → 更新 .env 的 PENGUIN_PASSWORD
+```
+
+### 本地路径：直接改 web.db（适用于旧版如 0.2.1，无官方命令）
+
+1. **停服务**，备份 `web.db`（如 `web.db.bak-<日期>`）。
+2. **生成新密码与哈希**：随机 20 位强密码；`hashlib.scrypt(密码, salt=os.urandom(16), n=16384, r=8, p=1, dklen=64, maxmem=128*1024*1024)`，存为 `scrypt$16384$8$1$<salt b64>$<hash b64>`（参数来自上游 `packages/server/src/auth/password.ts`）。
+3. **UPDATE + 吊销会话**（`UPDATE users SET password_hash=?, password_is_initial=0 WHERE user_id='admin'`；`DELETE FROM auth_sessions WHERE user_id='admin'`——吊销历史会话是泄露轮换的关键动作）。
+4. **验证三项**：新密码匹配新哈希 / 旧密码不匹配（已失效）/ DB 哈希与写入值一致。
+5. **同步**：更新 `.env` 的 `PENGUIN_PASSWORD`，下次启动 Gateway 登录链路即可用。
+
+> 实际执行记录：2026-09-11 已按本地路径完成轮换（吊销 141 个会话，三项验证通过，见 G4）。新密码存放于数据根旁 `new-admin-password.txt`（建议登录后改为自己记得住的密码并删除该文件）。
 
 ## 工程加固（已有实现）
 

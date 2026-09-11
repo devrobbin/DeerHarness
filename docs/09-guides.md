@@ -153,7 +153,7 @@ curl -s -X DELETE -H "$H" http://localhost:8080/api/fusion/team/schedules/<task_
 | **WebUI 打不开（访问了 3000）** | WebUI 端口是 **3002**（3000 是容器内部端口） | 访问 `http://localhost:3002` |
 | **`make up` 失败：挂载路径不存在** | compose 挂载了兄弟目录 `../deer-flow-run` 与 `../deer-flow`（config 回退轨用） | 按快速上手第 0 步布局 clone 上游仓库；或仅用宿主机 dev 模式 |
 | **Gateway 全部 API 返回 401** | 未带鉴权头，或 `ADMIN_API_KEY` 未配置（dev 模式死锁：无 key 无法自助建用户） | 带 `Authorization: Bearer $ADMIN_API_KEY`；dev 模式务必在 .env 配置 ADMIN_API_KEY |
-| **penguin 相关 502/登录失败** | penguin 未启动，或 PENGUIN_PASSWORD 不对（首次启动打印的种子密码） | 启动 penguin 并核对密码；日志找 `Seeded built-in admin "admin" — password: penguin-xxxx` |
+| **penguin 相关 502/登录失败** | penguin 未启动，或 PENGUIN_PASSWORD 不对（首次启动打印的种子密码） | 启动 penguin 并核对密码；日志找 `Seeded built-in admin "admin" — password: penguin-xxxx`；密码需要重置时按 [docs/07「上游凭据轮换」](07-safety.md) 执行 |
 | **DeerFlow 相关 502** | DeerFlow 官方栈未启动或 :2026 不可达 | `cd ../deer-flow && docker compose -f docker/docker-compose.yaml up -d`，`curl localhost:2026` 验证 |
 | **团队 sync 后报 503 "deer-flow 重启后未就绪"** | config 回退轨重启了 deer-flow 网关；**PAT-only 部署下探活必失败（已知缺口 G6）** | PAT 部署同时配置 DEERFLOW_EMAIL/PASSWORD；或确认走 API 轨（2.X managed-subagent 可用时优先） |
 | **容器部署团队 sync 失败（Read-only file system / docker not found）** | 容器形态 config 回退轨不可用（无 docker CLI + 只读挂载，已知缺口 G6/G7） | 容器部署仅支持 API 轨；团队 run 主路径接入双轨前，用宿主机 dev 模式 |
